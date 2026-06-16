@@ -124,31 +124,34 @@ export function InboxPanel() {
         />
       )}
 
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="text-xl font-bold text-zinc-100">今日收集箱</h2>
-          <p className="text-sm text-zinc-500 mt-1">不加评判地倾倒所有待办，让 AI 帮你过滤优先级。</p>
+          <p className="text-sm text-zinc-500 mt-0.5">不加评判地倾倒所有待办，让 AI 过滤优先级。</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setShowTemplates(true)}
-            className="btn-ghost flex items-center gap-1.5 text-sm border border-zinc-700 hover:border-zinc-600"
+            className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 text-zinc-300 text-xs font-medium transition-all"
             title="从常用模板快速添加"
           >
-            <span className="text-base leading-none">📋</span>
+            <span className="text-sm leading-none">📋</span>
             模板
           </button>
           <button
             onClick={() => setShowGuided(true)}
-            className="btn-ghost flex items-center gap-1.5 text-sm border border-zinc-700 hover:border-zinc-600"
+            className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 text-zinc-300 text-xs font-medium transition-all"
             title="按维度引导你系统性采集所有待办"
           >
-            <span className="text-base leading-none">🧠</span>
+            <span className="text-sm leading-none">🧠</span>
             引导采集
           </button>
-          <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-1.5">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-zinc-100 hover:bg-white text-zinc-900 text-xs font-semibold transition-all active:scale-95"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
             </svg>
             快速添加
           </button>
