@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { usePB } from '../hooks/usePB';
 import { tasksApi, milestonesApi, type Task, type Milestone } from '../services/pb';
+import { GuidedCapture } from './GuidedCapture';
 
 const PRIORITY_OPTIONS = [
   { value: 'inbox',  label: '收集箱',  style: 'tag-inbox' },
@@ -28,6 +29,7 @@ export function InboxPanel() {
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [showGuided, setShowGuided] = useState(false);
 
   async function addTask() {
     if (!title.trim() || saving) return;
@@ -50,6 +52,24 @@ export function InboxPanel() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleGuidedComplete(items: { text: string; dimensionId: string }[]) {
+    await Promise.all(
+      items.map(item =>
+        tasksApi.create({
+          milestoneId: '',
+          title: item.text,
+          description: '',
+          priorityType: 'inbox',
+          status: 'pending',
+          targetDate: '',
+          streakCount: 0,
+        })
+      )
+    );
+    refetch();
+    setShowGuided(false);
   }
 
   async function dropTask(id: string) {
@@ -82,17 +102,35 @@ export function InboxPanel() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Guided capture modal */}
+      {showGuided && (
+        <GuidedCapture
+          onComplete={handleGuidedComplete}
+          onClose={() => setShowGuided(false)}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-zinc-100">今日收集箱</h2>
           <p className="text-sm text-zinc-500 mt-1">不加评判地倾倒所有待办，让 AI 帮你过滤优先级。</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-1.5">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          添加任务
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowGuided(true)}
+            className="btn-ghost flex items-center gap-1.5 text-sm border border-zinc-700 hover:border-zinc-600"
+            title="按维度引导你系统性采集所有待办"
+          >
+            <span className="text-base leading-none">🧠</span>
+            引导采集
+          </button>
+          <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            快速添加
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -194,12 +232,20 @@ export function InboxPanel() {
       )}
 
       {(!tasks || tasks.length === 0) && (
-        <div className="card p-8 flex flex-col items-center justify-center text-center gap-3">
+        <div className="card p-8 flex flex-col items-center justify-center text-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center text-2xl">📥</div>
           <div>
             <p className="text-sm font-medium text-zinc-300">收集箱为空</p>
-            <p className="text-xs text-zinc-600 mt-1">把今天想做的所有事情都倒进来，不需要排序。</p>
+            <p className="text-xs text-zinc-600 mt-1 max-w-xs">
+              不知道从哪里开始？试试「引导采集」——它会带你从 6 个维度系统回忆所有待办。
+            </p>
           </div>
+          <button
+            onClick={() => setShowGuided(true)}
+            className="btn-primary flex items-center gap-2 text-sm"
+          >
+            <span>🧠</span> 开始引导采集
+          </button>
         </div>
       )}
     </div>
