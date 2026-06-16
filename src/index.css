@@ -53,6 +53,7 @@
     @apply bg-zinc-100 text-zinc-900 hover:bg-white font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-150 active:scale-95;
   }
 
+  /* Legacy utility classes — kept for any remaining references */
   .btn-ghost {
     @apply text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-sm px-3 py-1.5 rounded-lg transition-all duration-150;
   }
@@ -63,33 +64,5 @@
 
   .input-field {
     @apply bg-zinc-800 border border-zinc-700 text-zinc-100 placeholder-zinc-500 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500/50 transition-all duration-150 w-full;
-  }
-
-  .sidebar-step {
-    @apply flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-all duration-150;
-  }
-
-  .sidebar-step.active {
-    @apply bg-zinc-800 border border-zinc-700;
-  }
-
-  .sidebar-step.inactive {
-    @apply hover:bg-zinc-800/50 text-zinc-500;
-  }
-
-  .tag-must {
-    @apply bg-red-500/15 text-red-400 border border-red-500/25 px-2 py-0.5 rounded-md text-xs font-mono font-medium;
-  }
-
-  .tag-should {
-    @apply bg-amber-500/15 text-amber-400 border border-amber-500/25 px-2 py-0.5 rounded-md text-xs font-mono font-medium;
-  }
-
-  .tag-could {
-    @apply bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded-md text-xs font-mono font-medium;
-  }
-
-  .tag-inbox {
-    @apply bg-zinc-700/50 text-zinc-400 border border-zinc-600/50 px-2 py-0.5 rounded-md text-xs font-mono font-medium;
   }
 }
