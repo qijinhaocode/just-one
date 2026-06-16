@@ -1,6 +1,8 @@
-import { useState } from 'react';import { usePB } from '../hooks/usePB';
+import { useState } from 'react';
+import { usePB } from '../hooks/usePB';
 import { tasksApi, milestonesApi, type Task, type Milestone } from '../services/pb';
 import { GuidedCapture } from './GuidedCapture';
+import { TaskTemplates } from './TaskTemplates';
 
 const PRIORITY_OPTIONS = [
   { value: 'inbox',  label: '收集箱',  style: 'tag-inbox' },
@@ -30,6 +32,7 @@ export function InboxPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [showGuided, setShowGuided] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
 
   async function addTask() {
     if (!title.trim() || saving) return;
@@ -113,12 +116,28 @@ export function InboxPanel() {
         />
       )}
 
+      {/* Task templates modal */}
+      {showTemplates && (
+        <TaskTemplates
+          onClose={() => setShowTemplates(false)}
+          onAdded={(count) => { refetch(); setShowTemplates(count === 0); }}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-zinc-100">今日收集箱</h2>
           <p className="text-sm text-zinc-500 mt-1">不加评判地倾倒所有待办，让 AI 帮你过滤优先级。</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowTemplates(true)}
+            className="btn-ghost flex items-center gap-1.5 text-sm border border-zinc-700 hover:border-zinc-600"
+            title="从常用模板快速添加"
+          >
+            <span className="text-base leading-none">📋</span>
+            模板
+          </button>
           <button
             onClick={() => setShowGuided(true)}
             className="btn-ghost flex items-center gap-1.5 text-sm border border-zinc-700 hover:border-zinc-600"

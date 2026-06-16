@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { usePB } from '../hooks/usePB';
 import { tasksApi, type Task } from '../services/pb';
 import { StreakBadge, DayScore } from './StreakAndScore';
+import { CarryOverBanner } from './CarryOverBanner';
 import type { StreakData } from '../services/streak';
 
 interface FocusBoardProps {
@@ -176,6 +177,9 @@ export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysis
           <DayScore todayDone={streak?.todayDone ?? false} />
         </div>
       </div>
+
+      {/* Carry-over banner */}
+      <CarryOverBanner onCarried={() => {}} />
 
       <div className="flex items-center justify-between">
         <div>

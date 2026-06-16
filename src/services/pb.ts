@@ -65,6 +65,14 @@ export interface DailyReviewPayload {
 
 // ─── Connection check ─────────────────────────────────────────────────────────
 
+export interface TaskTemplate extends RecordModel {
+  title: string;
+  description: string;
+  why: string;
+  category: string;
+  useCount: number;
+}
+
 export async function checkConnection(): Promise<boolean> {
   try {
     await pb.health.check();
@@ -205,6 +213,48 @@ export const tasksApi = {
     );
   },
 
+  /**
+   * Carry over yesterday's unfinished must/should/could tasks to today.
+   * - Updates targetDate to today
+   * - If today already has a must task, demotes yesterday's must → should
+   * - Increments streakCount for each carried task
+   * Returns the number of tasks carried over.
+   */
+  async carryOverYesterday(): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = (() => {
+      const d = new Date(today + 'T00:00:00');
+      d.setDate(d.getDate() - 1);
+      return d.toISOString().split('T')[0];
+    })();
+
+    // Find yesterday's unfinished priority tasks
+    const stale = await pb.collection('tasks').getList<Task>(1, 200, {
+      filter: `status = "pending" && priorityType != "inbox" && targetDate = "${yesterday}"`,
+    });
+    if (stale.items.length === 0) return 0;
+
+    // Check if today already has a must task
+    const todayMust = await pb.collection('tasks').getList<Task>(1, 1, {
+      filter: `priorityType = "must" && status != "dropped" && (targetDate = "${today}" || targetDate = "")`,
+    });
+    const hasTodayMust = todayMust.totalItems > 0;
+
+    await Promise.all(
+      stale.items.map(t => {
+        const newPriority =
+          t.priorityType === 'must' && hasTodayMust ? 'should' : t.priorityType;
+        return pb.collection('tasks').update(t.id, {
+          targetDate: today,
+          priorityType: newPriority,
+          streakCount: (t.streakCount ?? 0) + 1,
+        });
+      })
+    );
+
+    return stale.items.length;
+  },
+
   subscribe(callback: (items: Task[]) => void, filter?: string): () => void {
     const refresh = async () => {
       const res = await pb.collection('tasks').getList<Task>(1, 1000, {
@@ -255,6 +305,51 @@ export const reviewsApi = {
     pb.collection('daily_reviews').subscribe('*', () => refresh());
     refresh();
     return () => { pb.collection('daily_reviews').unsubscribe('*'); };
+  },
+};
+
+// ─── Task Templates ───────────────────────────────────────────────────────────
+
+export const templatesApi = {
+  async list(): Promise<TaskTemplate[]> {
+    const res = await pb.collection('task_templates').getList<TaskTemplate>(1, 200, {
+      sort: '-useCount,-created',
+    });
+    return res.items;
+  },
+
+  async create(data: Omit<TaskTemplate, keyof RecordModel>): Promise<TaskTemplate> {
+    return pb.collection('task_templates').create<TaskTemplate>(data);
+  },
+
+  async delete(id: string): Promise<void> {
+    await pb.collection('task_templates').delete(id);
+  },
+
+  /** Increment useCount and return a new Task payload ready to create */
+  async useTemplate(id: string): Promise<Omit<Task, keyof RecordModel>> {
+    const t = await pb.collection('task_templates').getOne<TaskTemplate>(id);
+    await pb.collection('task_templates').update(id, { useCount: (t.useCount ?? 0) + 1 });
+    return {
+      milestoneId: '',
+      title: t.title,
+      description: t.description ?? '',
+      why: t.why ?? '',
+      priorityType: 'inbox',
+      status: 'pending',
+      targetDate: '',
+      streakCount: 0,
+    };
+  },
+
+  subscribe(callback: (items: TaskTemplate[]) => void): () => void {
+    const refresh = async () => {
+      const res = await pb.collection('task_templates').getList<TaskTemplate>(1, 200, { sort: '-useCount,-created' });
+      callback(res.items);
+    };
+    pb.collection('task_templates').subscribe('*', () => refresh());
+    refresh();
+    return () => { pb.collection('task_templates').unsubscribe('*'); };
   },
 };
 
