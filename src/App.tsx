@@ -6,8 +6,10 @@ import { MilestonePanel } from './components/MilestonePanel';
 import { InboxPanel } from './components/InboxPanel';
 import { FocusBoard } from './components/FocusBoard';
 import { EveningReview } from './components/EveningReview';
+import { MorningRitual } from './components/MorningRitual';
 import { usePB } from './hooks/usePB';
 import { visionsApi, milestonesApi, tasksApi, type DailyReviewPayload } from './services/pb';
+import { computeStreak, type StreakData } from './services/streak';
 
 // ── Dashboard lazy load (OUTSIDE App to keep stable component identity) ───────
 const DashboardComponent = lazy(() =>
@@ -28,6 +30,8 @@ export default function App() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [analysisSummary, setAnalysisSummary] = useState<string | null>(null);
   const [apiVersion, setApiVersion] = useState(0);
+  const [streak, setStreak] = useState<StreakData | null>(null);
+  const [showRitual, setShowRitual] = useState(false);
 
   // ── Re-evaluate day phase every minute ──────────────────────────────────────
   useEffect(() => {
@@ -46,6 +50,27 @@ export default function App() {
       });
     }
   }, []);
+
+  // ── Load streak data + show morning ritual once per day ──────────────────────
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const lastRitual = localStorage.getItem('last_ritual_date');
+
+    computeStreak().then(data => {
+      setStreak(data);
+      // Show morning ritual once per day, only in morning phase
+      if (lastRitual !== today && getDayPhase() === 'morning') {
+        setShowRitual(true);
+      }
+    });
+  }, []);
+
+  // Re-compute streak whenever daily_reviews changes (e.g. after evening review)
+  const { data: _reviewTrigger } = usePB<number>(
+    () => computeStreak().then(data => { setStreak(data); return 0; }),
+    [], 'daily_reviews'
+  );
+  void _reviewTrigger;
 
   // ── Live counts for sidebar badges ──────────────────────────────────────────
   const { data: visionCount } = usePB<number>(
@@ -182,12 +207,23 @@ export default function App() {
         aiLoading={aiLoading}
         aiError={aiError}
         analysisSummary={analysisSummary}
+        streak={streak}
       />
     );
   }
 
+  function dismissRitual() {
+    const today = new Date().toISOString().split('T')[0];
+    localStorage.setItem('last_ritual_date', today);
+    setShowRitual(false);
+  }
+
   return (
     <div className="h-screen flex flex-col bg-zinc-950 overflow-hidden">
+      {/* Morning ritual overlay */}
+      {showRitual && (
+        <MorningRitual streak={streak} onDismiss={dismissRitual} />
+      )}
       <Navbar onApiConfigSaved={() => setApiVersion(v => v + 1)} />
       <div className="flex flex-1 overflow-hidden" key={apiVersion}>
         <Sidebar

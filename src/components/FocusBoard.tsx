@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { usePB } from '../hooks/usePB';
 import { tasksApi, type Task } from '../services/pb';
+import { StreakBadge, DayScore } from './StreakAndScore';
+import type { StreakData } from '../services/streak';
 
 interface FocusBoardProps {
   notToDoRules: string[];
@@ -8,6 +10,7 @@ interface FocusBoardProps {
   aiLoading: boolean;
   aiError: string | null;
   analysisSummary: string | null;
+  streak: StreakData | null;
 }
 
 function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'normal' }) {
@@ -98,7 +101,7 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
   );
 }
 
-export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysisSummary }: FocusBoardProps) {
+export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysisSummary, streak }: FocusBoardProps) {
   const today = new Date().toISOString().split('T')[0];
 
   const { data: mustTasks } = usePB<Task[]>(
@@ -121,7 +124,15 @@ export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysis
   const hasAnyFocusTasks = (mustTasks?.length ?? 0) + (shouldTasks?.length ?? 0) + (couldTasks?.length ?? 0) > 0;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-5 animate-fade-in">
+      {/* Streak + Score row */}
+      <div className="flex gap-3">
+        <StreakBadge streak={streak} />
+        <div className="flex-1">
+          <DayScore todayDone={streak?.todayDone ?? false} />
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-zinc-100">今日聚焦看板</h2>
