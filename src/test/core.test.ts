@@ -1,102 +1,139 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ── db.ts unit tests ──────────────────────────────────────────────────────────
-// We mock Dexie so tests run without a real IndexedDB env
-
-vi.mock('dexie', () => {
-  const tables: Record<string, unknown[]> = {};
-  class MockTable {
+// ── Mock PocketBase SDK ───────────────────────────────────────────────────────
+vi.mock('pocketbase', () => {
+  class MockCollection {
     name: string;
-    constructor(n: string) { this.name = n; tables[n] = []; }
-    async add(item: Record<string, unknown>) { tables[this.name].push(item); return item.id; }
-    async clear() { tables[this.name] = []; }
-    async toArray() { return tables[this.name]; }
+    _data: Record<string, unknown>[] = [];
+    constructor(n: string) { this.name = n; }
+    async getList(_p: number, _pp: number, _opts?: unknown) { return { items: this._data, totalItems: this._data.length }; }
+    async create(data: Record<string, unknown>) { const r = { id: crypto.randomUUID(), ...data }; this._data.push(r); return r; }
+    async update(id: string, data: Record<string, unknown>) {
+      const idx = this._data.findIndex((r: Record<string, unknown>) => r.id === id);
+      if (idx >= 0) this._data[idx] = { ...this._data[idx], ...data };
+      return this._data[idx];
+    }
+    async delete(id: string) { this._data = this._data.filter((r: Record<string, unknown>) => r.id !== id); }
+    subscribe() {}
+    unsubscribe() {}
   }
-  class MockDexie {
-    visions = new MockTable('visions');
-    milestones = new MockTable('milestones');
-    tasks = new MockTable('tasks');
-    dailyReviews = new MockTable('dailyReviews');
-    version() { return { stores: () => {} }; }
-    transaction(_mode: string, _tables: unknown[], fn: () => Promise<void>) { return fn(); }
+  class MockPB {
+    _cols: Record<string, MockCollection> = {};
+    autoCancellation() {}
+    collection(name: string) {
+      if (!this._cols[name]) this._cols[name] = new MockCollection(name);
+      return this._cols[name];
+    }
+    get health() { return { check: async () => ({ code: 200 }) }; }
   }
-  return { default: MockDexie };
+  return { default: MockPB };
 });
 
-describe('db schema', () => {
-  it('Vision interface has required fields', () => {
-    const v = {
-      id: crypto.randomUUID(),
-      content: 'Test vision',
-      target_year: 2030,
-      isActive: 1,
-      createdAt: new Date(),
-    };
-    expect(v.content).toBe('Test vision');
-    expect(v.isActive).toBe(1);
-    expect(v.target_year).toBe(2030);
+// ── Task schema validation ────────────────────────────────────────────────────
+describe('Task type contract', () => {
+  it('priorityType accepts valid values', () => {
+    const valid = ['inbox', 'must', 'should', 'could'] as const;
+    valid.forEach(v => expect(valid).toContain(v));
   });
 
-  it('Task priorityType accepts valid values', () => {
-    const validTypes = ['inbox', 'must', 'should', 'could'] as const;
-    validTypes.forEach(t => expect(validTypes).toContain(t));
-  });
-
-  it('Task status accepts valid values', () => {
-    const validStatuses = ['pending', 'completed', 'dropped'] as const;
-    validStatuses.forEach(s => expect(validStatuses).toContain(s));
-  });
-
-  it('DailyReview date format is YYYY-MM-DD', () => {
-    const today = new Date().toISOString().split('T')[0];
-    expect(today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  it('status accepts valid values', () => {
+    const valid = ['pending', 'completed', 'dropped'] as const;
+    valid.forEach(s => expect(valid).toContain(s));
   });
 
   it('streakCount defaults to 0 for new tasks', () => {
-    const task = {
-      id: crypto.randomUUID(),
-      title: 'Test task',
-      priorityType: 'inbox' as const,
-      status: 'pending' as const,
-      streakCount: 0,
-      createdAt: new Date(),
-    };
+    const task = { id: crypto.randomUUID(), title: 'Test', priorityType: 'inbox', status: 'pending', streakCount: 0, created: new Date().toISOString() };
     expect(task.streakCount).toBe(0);
   });
 });
 
-describe('gemini service utilities', () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  it('throws if API key is missing', async () => {
-    // Dynamic import to avoid executing module at top level
-    const { runAlignment } = await import('../services/gemini');
-    await expect(runAlignment({ visions: [], milestones: [], tasks: [] }))
-      .rejects
-      .toThrow('Gemini API Key 未配置');
-  });
-
-  it('reads api key from localStorage and does not throw "未配置"', () => {
-    localStorage.setItem('gemini_api_key', 'test-key-123');
-    // Verify the key is accessible (the actual network call is not needed here)
-    const key = localStorage.getItem('gemini_api_key');
-    expect(key).toBe('test-key-123');
-    expect(key).not.toBeNull();
+// ── Vision schema validation ──────────────────────────────────────────────────
+describe('Vision type contract', () => {
+  it('has required fields', () => {
+    const v = { id: crypto.randomUUID(), content: 'Build a product', target_year: 2030, isActive: true };
+    expect(v.content).toBe('Build a product');
+    expect(v.target_year).toBe(2030);
+    expect(v.isActive).toBe(true);
   });
 });
 
-describe('day phase logic', () => {
-  it('morning hours return morning phase', () => {
-    const hour = 9;
-    const phase = hour >= 18 ? 'evening' : 'morning';
-    expect(phase).toBe('morning');
+// ── DailyReview schema validation ─────────────────────────────────────────────
+describe('DailyReview type contract', () => {
+  it('date format is YYYY-MM-DD', () => {
+    const today = new Date().toISOString().split('T')[0];
+    expect(today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it('evening hours return evening phase', () => {
-    const hour = 20;
-    const phase = hour >= 18 ? 'evening' : 'morning';
-    expect(phase).toBe('evening');
+  it('focusScore is in range 1-10', () => {
+    const score = 7;
+    expect(score).toBeGreaterThanOrEqual(1);
+    expect(score).toBeLessThanOrEqual(10);
+  });
+});
+
+// ── Day phase logic ───────────────────────────────────────────────────────────
+describe('Day phase logic', () => {
+  it('morning hours → morning phase', () => {
+    expect(9 >= 18 ? 'evening' : 'morning').toBe('morning');
+  });
+
+  it('18:00+ → evening phase', () => {
+    expect(20 >= 18 ? 'evening' : 'morning').toBe('evening');
+  });
+
+  it('boundary: exactly 18:00 → evening', () => {
+    expect(18 >= 18 ? 'evening' : 'morning').toBe('evening');
+  });
+});
+
+// ── Gemini service config guard ────────────────────────────────────────────────
+describe('Gemini service', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('throws when API key is not set', async () => {
+    const { runAlignment } = await import('../services/gemini');
+    await expect(runAlignment({ visions: [], milestones: [], tasks: [] }))
+      .rejects.toThrow('Gemini API Key 未配置');
+  });
+
+  it('reads API key from localStorage', () => {
+    localStorage.setItem('gemini_api_key', 'test-abc');
+    expect(localStorage.getItem('gemini_api_key')).toBe('test-abc');
+  });
+});
+
+// ── PocketBase service layer ──────────────────────────────────────────────────
+describe('PocketBase service layer', () => {
+  it('checkConnection returns true when PB responds', async () => {
+    const { checkConnection } = await import('../services/pb');
+    const ok = await checkConnection();
+    expect(ok).toBe(true);
+  });
+
+  it('visionsApi.create stores a vision', async () => {
+    const { visionsApi } = await import('../services/pb');
+    const v = await visionsApi.create({ content: 'Test vision', target_year: 2030, isActive: false });
+    expect(v.content).toBe('Test vision');
+    expect(v.target_year).toBe(2030);
+  });
+
+  it('tasksApi.create stores a task', async () => {
+    const { tasksApi } = await import('../services/pb');
+    const t = await tasksApi.create({
+      milestoneId: '', title: 'Write tests', description: '',
+      priorityType: 'inbox', status: 'pending', targetDate: '', streakCount: 0,
+    });
+    expect(t.title).toBe('Write tests');
+    expect(t.priorityType).toBe('inbox');
+  });
+
+  it('tasksApi.update changes priorityType', async () => {
+    const { tasksApi } = await import('../services/pb');
+    const t = await tasksApi.create({
+      milestoneId: '', title: 'Promote me', description: '',
+      priorityType: 'inbox', status: 'pending', targetDate: '', streakCount: 0,
+    });
+    const updated = await tasksApi.update(t.id, { priorityType: 'must' });
+    expect(updated.priorityType).toBe('must');
   });
 });

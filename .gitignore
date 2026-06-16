@@ -144,3 +144,15 @@ vite.config.ts.timestamp-*
 
 # TypeScript composite build output
 dist-node/
+
+# PocketBase binary and runtime data (data is in pb_data, not committed)
+pocketbase/pocketbase
+pocketbase/pb_data/
+pocketbase/CHANGELOG.md
+pocketbase/LICENSE.md
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+
+# IDE
+.idea/

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Task } from '../db';
+import { usePB } from '../hooks/usePB';
+import { tasksApi, type Task } from '../services/pb';
 
 interface FocusBoardProps {
   notToDoRules: string[];
@@ -17,7 +17,7 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
     if (completing) return;
     setCompleting(true);
     const next = task.status === 'completed' ? 'pending' : 'completed';
-    await db.tasks.update(task.id!, { status: next });
+    await tasksApi.update(task.id, { status: next });
     setTimeout(() => setCompleting(false), 400);
   }
 
@@ -33,9 +33,7 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
           <button
             onClick={toggleComplete}
             className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all duration-300 shrink-0 mt-0.5
-              ${isCompleted
-                ? 'bg-emerald-500 border-emerald-500'
-                : 'border-red-500/60 hover:border-red-400 hover:bg-red-500/10'}`}
+              ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-red-500/60 hover:border-red-400 hover:bg-red-500/10'}`}
           >
             {(isCompleted || completing) && (
               <svg className="w-4 h-4 text-white animate-check-pop" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,15 +68,13 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
     );
   }
 
-  const typeColors: Record<Task['priorityType'], string> = {
-    must: 'border-red-500/20',
-    should: 'border-amber-500/20',
-    could: 'border-emerald-500/20',
-    inbox: 'border-zinc-700',
+  const borderByType: Record<Task['priorityType'], string> = {
+    must: 'border-red-500/20', should: 'border-amber-500/20',
+    could: 'border-emerald-500/20', inbox: 'border-zinc-700',
   };
 
   return (
-    <div className={`card p-4 flex items-start gap-3 transition-all duration-150 hover:border-zinc-700 ${typeColors[task.priorityType]} ${isCompleted ? 'opacity-60' : ''}`}>
+    <div className={`card p-4 flex items-start gap-3 transition-all duration-150 hover:border-zinc-700 ${borderByType[task.priorityType]} ${isCompleted ? 'opacity-60' : ''}`}>
       <button
         onClick={toggleComplete}
         className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all duration-300 shrink-0 mt-0.5
@@ -105,28 +101,27 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
 export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysisSummary }: FocusBoardProps) {
   const today = new Date().toISOString().split('T')[0];
 
-  const mustTasks = useLiveQuery(
-    () => db.tasks.where('priorityType').equals('must').filter(t => t.status !== 'dropped' && (t.targetDate === today || !t.targetDate)).toArray(),
-    [today]
+  const { data: mustTasks } = usePB<Task[]>(
+    () => tasksApi.list(`priorityType = "must" && status != "dropped" && (targetDate = "${today}" || targetDate = "")`),
+    [today], 'tasks'
   );
-  const shouldTasks = useLiveQuery(
-    () => db.tasks.where('priorityType').equals('should').filter(t => t.status !== 'dropped' && (t.targetDate === today || !t.targetDate)).toArray(),
-    [today]
+  const { data: shouldTasks } = usePB<Task[]>(
+    () => tasksApi.list(`priorityType = "should" && status != "dropped" && (targetDate = "${today}" || targetDate = "")`),
+    [today], 'tasks'
   );
-  const couldTasks = useLiveQuery(
-    () => db.tasks.where('priorityType').equals('could').filter(t => t.status !== 'dropped' && (t.targetDate === today || !t.targetDate)).toArray(),
-    [today]
+  const { data: couldTasks } = usePB<Task[]>(
+    () => tasksApi.list(`priorityType = "could" && status != "dropped" && (targetDate = "${today}" || targetDate = "")`),
+    [today], 'tasks'
   );
-  const inboxCount = useLiveQuery(
-    () => db.tasks.where('priorityType').equals('inbox').filter(t => t.status !== 'dropped').count(),
-    []
+  const { data: inboxCount } = usePB<number>(
+    () => tasksApi.list('priorityType = "inbox" && status != "dropped"').then(r => r.length),
+    [], 'tasks'
   );
 
   const hasAnyFocusTasks = (mustTasks?.length ?? 0) + (shouldTasks?.length ?? 0) + (couldTasks?.length ?? 0) > 0;
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-zinc-100">今日聚焦看板</h2>
@@ -151,24 +146,23 @@ export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysis
             <>
               <span className="text-sm">✦</span>
               开始 AI 对齐分析
-              {(inboxCount ?? 0) > 0 && <span className="bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded text-xs font-mono">{inboxCount}</span>}
+              {(inboxCount ?? 0) > 0 && (
+                <span className="bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded text-xs font-mono">{inboxCount}</span>
+              )}
             </>
           )}
         </button>
       </div>
 
-      {/* AI error */}
       {aiError && (
         <div className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl animate-slide-up">
           <svg className="w-4 h-4 text-red-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-xs text-red-400">{aiError}</p>
         </div>
       )}
 
-      {/* AI summary */}
       {analysisSummary && (
         <div className="card p-4 bg-zinc-800/40 border-zinc-700/60 animate-slide-up">
           <div className="flex items-center gap-2 mb-2">
@@ -178,7 +172,6 @@ export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysis
         </div>
       )}
 
-      {/* No tasks state */}
       {!hasAnyFocusTasks && (
         <div className="card p-10 flex flex-col items-center justify-center text-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-zinc-800 flex items-center justify-center text-3xl">🎯</div>
@@ -196,7 +189,6 @@ export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysis
         </div>
       )}
 
-      {/* Must - 1 件大事 */}
       {mustTasks && mustTasks.length > 0 && (
         <section>
           <div className="flex items-center gap-2 mb-3">
@@ -207,7 +199,6 @@ export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysis
         </section>
       )}
 
-      {/* Should - 3 件中事 */}
       {shouldTasks && shouldTasks.length > 0 && (
         <section>
           <div className="flex items-center gap-2 mb-3">
@@ -217,14 +208,11 @@ export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysis
             </span>
           </div>
           <div className="grid grid-cols-1 gap-2">
-            {shouldTasks.slice(0, 3).map(task => (
-              <TaskCard key={task.id} task={task} />
-            ))}
+            {shouldTasks.slice(0, 3).map(task => <TaskCard key={task.id} task={task} />)}
           </div>
         </section>
       )}
 
-      {/* Could - 5 件小事 */}
       {couldTasks && couldTasks.length > 0 && (
         <section>
           <div className="flex items-center gap-2 mb-3">
@@ -234,14 +222,11 @@ export function FocusBoard({ notToDoRules, onRunAI, aiLoading, aiError, analysis
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {couldTasks.slice(0, 5).map(task => (
-              <TaskCard key={task.id} task={task} />
-            ))}
+            {couldTasks.slice(0, 5).map(task => <TaskCard key={task.id} task={task} />)}
           </div>
         </section>
       )}
 
-      {/* Not-To-Do rules */}
       {notToDoRules.length > 0 && (
         <section>
           <div className="flex items-center gap-2 mb-3">

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Milestone } from '../db';
+import { usePB } from '../hooks/usePB';
+import { pb, milestonesApi, visionsApi, type Milestone, type Vision } from '../services/pb';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -21,37 +21,62 @@ function generateTimeFrameOptions() {
 }
 
 export function MilestonePanel() {
-  const milestones = useLiveQuery(() => db.milestones.orderBy('createdAt').reverse().toArray(), []);
-  const visions = useLiveQuery(() => db.visions.where('isActive').equals(1).toArray(), []);
+  const { data: milestones, refetch } = usePB<Milestone[]>(
+    () => milestonesApi.list(),
+    [],
+    'milestones'
+  );
+  const { data: visions } = usePB<Vision[]>(() => visionsApi.list(), [], 'visions');
+
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [timeFrame, setTimeFrame] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
 
   const timeFrameOptions = generateTimeFrameOptions();
-  const activeVision = visions?.[0];
+  const activeVision = visions?.find(v => v.isActive);
 
   async function addMilestone() {
-    if (!title.trim() || !timeFrame) return;
-    const milestone: Milestone = {
-      id: crypto.randomUUID(),
-      visionId: activeVision?.id,
-      title: title.trim(),
-      timeFrame,
-      status: 'pending',
-      createdAt: new Date(),
-    };
-    await db.milestones.add(milestone);
-    setTitle('');
-    setShowForm(false);
+    if (!title.trim() || !timeFrame || saving) return;
+    setSaving(true);
+    try {
+      await milestonesApi.create({
+        visionId: activeVision?.id ?? '',
+        title: title.trim(),
+        timeFrame,
+        status: 'pending',
+      });
+      setTitle('');
+      setShowForm(false);
+      refetch();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function toggleStatus(id: string, current: Milestone['status']) {
     const next = current === 'pending' ? 'completed' : current === 'completed' ? 'archived' : 'pending';
-    await db.milestones.update(id, { status: next });
+    await milestonesApi.updateStatus(id, next);
+    refetch();
+  }
+
+  async function startEdit(m: Milestone) {
+    setEditingId(m.id);
+    setEditTitle(m.title);
+  }
+
+  async function saveEdit(id: string) {
+    if (!editTitle.trim()) return;
+    await pb.collection('milestones').update(id, { title: editTitle.trim() });
+    setEditingId(null);
+    refetch();
   }
 
   async function deleteMilestone(id: string) {
-    await db.milestones.delete(id);
+    await milestonesApi.delete(id);
+    refetch();
   }
 
   const statusStyle: Record<Milestone['status'], string> = {
@@ -59,11 +84,8 @@ export function MilestonePanel() {
     completed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
     archived: 'bg-zinc-700/50 text-zinc-500 border-zinc-600/50',
   };
-
   const statusLabel: Record<Milestone['status'], string> = {
-    pending: '进行中',
-    completed: '已完成',
-    archived: '已归档',
+    pending: '进行中', completed: '已完成', archived: '已归档',
   };
 
   return (
@@ -90,7 +112,6 @@ export function MilestonePanel() {
           </div>
         </div>
       )}
-
       {!activeVision && (
         <div className="p-3 bg-amber-500/5 border border-amber-500/15 rounded-xl">
           <p className="text-xs text-amber-400">请先在 Step 1 中设定并激活一个长期愿景。</p>
@@ -111,26 +132,22 @@ export function MilestonePanel() {
           </div>
           <div>
             <label className="text-xs font-medium text-zinc-400 block mb-1.5">时间区间</label>
-            <select
-              className="input-field font-mono"
-              value={timeFrame}
-              onChange={e => setTimeFrame(e.target.value)}
-            >
+            <select className="input-field font-mono" value={timeFrame} onChange={e => setTimeFrame(e.target.value)}>
               <option value="">选择时间区间...</option>
-              {timeFrameOptions.map(tf => (
-                <option key={tf} value={tf}>{tf}</option>
-              ))}
+              {timeFrameOptions.map(tf => <option key={tf} value={tf}>{tf}</option>)}
             </select>
           </div>
           <div className="flex justify-end gap-2">
             <button onClick={() => setShowForm(false)} className="btn-ghost">取消</button>
-            <button onClick={addMilestone} disabled={!title.trim() || !timeFrame} className="btn-primary">保存里程碑</button>
+            <button onClick={addMilestone} disabled={!title.trim() || !timeFrame || saving} className="btn-primary">
+              {saving ? '保存中...' : '保存里程碑'}
+            </button>
           </div>
         </div>
       )}
 
       <div className="space-y-3">
-        {milestones?.length === 0 && (
+        {(!milestones || milestones.length === 0) && (
           <div className="card p-8 flex flex-col items-center justify-center text-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center text-2xl">🏔️</div>
             <div>
@@ -144,7 +161,7 @@ export function MilestonePanel() {
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3 flex-1">
                 <button
-                  onClick={() => toggleStatus(m.id!, m.status)}
+                  onClick={() => toggleStatus(m.id, m.status)}
                   className="mt-0.5 shrink-0 w-5 h-5 rounded-full border-2 border-zinc-600 hover:border-zinc-400 flex items-center justify-center transition-all"
                 >
                   {m.status === 'completed' && (
@@ -152,9 +169,27 @@ export function MilestonePanel() {
                   )}
                 </button>
                 <div className="flex-1">
-                  <p className={`text-sm font-medium ${m.status === 'completed' ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
-                    {m.title}
-                  </p>
+                  {editingId === m.id ? (
+                    <div className="flex gap-2">
+                      <input
+                        className="input-field text-sm py-1"
+                        value={editTitle}
+                        onChange={e => setEditTitle(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(m.id); if (e.key === 'Escape') setEditingId(null); }}
+                        autoFocus
+                      />
+                      <button onClick={() => saveEdit(m.id)} className="btn-primary text-xs px-2 py-1">保存</button>
+                      <button onClick={() => setEditingId(null)} className="btn-ghost text-xs">取消</button>
+                    </div>
+                  ) : (
+                    <p
+                      className={`text-sm font-medium cursor-pointer hover:text-zinc-100 ${m.status === 'completed' ? 'line-through text-zinc-500' : 'text-zinc-200'}`}
+                      onDoubleClick={() => startEdit(m)}
+                      title="双击编辑"
+                    >
+                      {m.title}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className="text-xs font-mono text-zinc-600">{m.timeFrame}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-md border font-mono ${statusStyle[m.status]}`}>
@@ -164,7 +199,7 @@ export function MilestonePanel() {
                 </div>
               </div>
               <button
-                onClick={() => deleteMilestone(m.id!)}
+                onClick={() => deleteMilestone(m.id)}
                 className="text-zinc-600 hover:text-red-400 w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-500/10 transition-all shrink-0"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

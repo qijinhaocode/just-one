@@ -1,22 +1,22 @@
 import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type DailyReview } from '../db';
+import { usePB } from '../hooks/usePB';
+import { tasksApi, reviewsApi, type Task, type DailyReview, type DailyReviewPayload } from '../services/pb';
 
 interface EveningReviewProps {
-  onGenerateInsight: (review: Omit<DailyReview, 'id' | 'aiInsight' | 'createdAt'>) => Promise<string>;
+  onGenerateInsight: (review: DailyReviewPayload) => Promise<string>;
 }
 
 export function EveningReview({ onGenerateInsight }: EveningReviewProps) {
   const today = new Date().toISOString().split('T')[0];
 
-  const todayReview = useLiveQuery(
-    () => db.dailyReviews.where('date').equals(today).first(),
-    [today]
+  const { data: todayReview, refetch: refetchReview } = usePB<DailyReview | null>(
+    () => reviewsApi.getByDate(today),
+    [today], 'daily_reviews'
   );
 
-  const mustTask = useLiveQuery(
-    () => db.tasks.where('priorityType').equals('must').filter(t => t.status !== 'dropped').first(),
-    []
+  const { data: mustTask } = usePB<Task | null>(
+    () => tasksApi.list(`priorityType = "must" && status != "dropped" && (targetDate = "${today}" || targetDate = "")`).then(r => r[0] ?? null),
+    [today], 'tasks'
   );
 
   const [focusScore, setFocusScore] = useState(7);
@@ -25,38 +25,26 @@ export function EveningReview({ onGenerateInsight }: EveningReviewProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const mustCompleted = mustTask?.status === 'completed' ? 1 : 0;
+  const mustCompleted = mustTask?.status === 'completed';
 
   async function handleSubmit() {
     if (!q1.trim() || !q2.trim()) return;
     setLoading(true);
     setError(null);
-
     try {
-      const reviewData = {
+      const reviewData: DailyReviewPayload = {
         date: today,
         mustCompleted,
         reflectionQ1: q1.trim(),
         reflectionQ2: q2.trim(),
         focusScore,
+        aiInsight: '',
       };
-
       const aiInsight = await onGenerateInsight(reviewData);
-
-      const existing = await db.dailyReviews.where('date').equals(today).first();
-      if (existing?.id) {
-        await db.dailyReviews.update(existing.id, { ...reviewData, aiInsight });
-      } else {
-        await db.dailyReviews.add({
-          ...reviewData,
-          id: crypto.randomUUID(),
-          aiInsight,
-          createdAt: new Date(),
-        });
-      }
-
+      await reviewsApi.upsert({ ...reviewData, aiInsight });
       setQ1('');
       setQ2('');
+      refetchReview();
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败，请重试');
     } finally {
@@ -71,7 +59,6 @@ export function EveningReview({ onGenerateInsight }: EveningReviewProps) {
         <p className="text-sm text-zinc-500 mt-1">结束一天，诚实地审视自己的执行状态。</p>
       </div>
 
-      {/* Must-Do status */}
       <div className={`card p-4 flex items-center gap-4 ${mustCompleted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/20'}`}>
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl ${mustCompleted ? 'bg-emerald-500/20' : 'bg-red-500/10'}`}>
           {mustCompleted ? '✅' : '❌'}
@@ -84,57 +71,39 @@ export function EveningReview({ onGenerateInsight }: EveningReviewProps) {
         </div>
       </div>
 
-      {/* Focus score */}
       <div className="card p-5 space-y-4">
         <div className="flex items-center justify-between">
           <label className="text-sm font-medium text-zinc-300">今日专注度评分</label>
-          <span className="text-2xl font-black font-mono text-zinc-100">{focusScore}<span className="text-sm font-normal text-zinc-500">/10</span></span>
+          <span className="text-2xl font-black font-mono text-zinc-100">
+            {focusScore}<span className="text-sm font-normal text-zinc-500">/10</span>
+          </span>
         </div>
-        <div className="relative">
-          <input
-            type="range"
-            min={1}
-            max={10}
-            value={focusScore}
-            onChange={e => setFocusScore(Number(e.target.value))}
-            className="w-full h-1.5 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-zinc-400"
-          />
-          <div className="flex justify-between text-xs text-zinc-600 font-mono mt-1.5">
-            <span>1 走神</span>
-            <span>5 一般</span>
-            <span>10 心流</span>
-          </div>
+        <input
+          type="range" min={1} max={10} value={focusScore}
+          onChange={e => setFocusScore(Number(e.target.value))}
+          className="w-full h-1.5 bg-zinc-800 rounded-full appearance-none cursor-pointer accent-zinc-400"
+        />
+        <div className="flex justify-between text-xs text-zinc-600 font-mono">
+          <span>1 走神</span><span>5 一般</span><span>10 心流</span>
         </div>
       </div>
 
-      {/* Reflection Q1 */}
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-zinc-300 block">今天完成了什么？</label>
-        <textarea
-          className="input-field resize-none"
-          rows={3}
+        <textarea className="input-field resize-none" rows={3}
           placeholder="无论大小，都值得被记录下来…"
-          value={q1}
-          onChange={e => setQ1(e.target.value)}
-        />
+          value={q1} onChange={e => setQ1(e.target.value)} />
       </div>
 
-      {/* Reflection Q2 */}
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-zinc-300 block">遇到了什么阻碍？</label>
-        <textarea
-          className="input-field resize-none"
-          rows={3}
+        <textarea className="input-field resize-none" rows={3}
           placeholder="外部干扰？内部阻力？时间分配问题？"
-          value={q2}
-          onChange={e => setQ2(e.target.value)}
-        />
+          value={q2} onChange={e => setQ2(e.target.value)} />
       </div>
 
       {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400">
-          {error}
-        </div>
+        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400">{error}</div>
       )}
 
       <button
@@ -151,14 +120,10 @@ export function EveningReview({ onGenerateInsight }: EveningReviewProps) {
             AI Coach 诊断中...
           </>
         ) : (
-          <>
-            <span>✦</span>
-            生成 AI 深度洞察
-          </>
+          <><span>✦</span> 生成 AI 深度洞察</>
         )}
       </button>
 
-      {/* Today's insight if already generated */}
       {todayReview?.aiInsight && (
         <div className="card p-5 bg-zinc-800/40 border-zinc-700/60 space-y-3 animate-slide-up">
           <div className="flex items-center gap-2">

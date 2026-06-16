@@ -17,6 +17,9 @@ importers:
       dexie-react-hooks:
         specifier: ^1.1.7
         version: 1.1.7(@types/react@18.3.31)(dexie@4.4.3)(react@18.3.1)
+      pocketbase:
+        specifier: ^0.27.0
+        version: 0.27.0
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -1287,6 +1290,9 @@ packages:
   pirates@4.0.7:
     resolution: {integrity: sha512-TfySrs/5nm8fQJDcBDuUng3VOUKsd7S+zqvbOTiGXHfxX4wK31ard+hoNuvkicM/2YFzlpDgABOevKSsB4G/FA==}
     engines: {node: '>= 6'}
+
+  pocketbase@0.27.0:
+    resolution: {integrity: sha512-K5N6d93UP/BNMbMnlZ6BUfy9VPCIvLyqhJFOsNI8OsZwzvKWEAfyD36boi5K4ECIOl5HMlo0TzuaeGdKpMwizQ==}
 
   postcss-import@15.1.0:
     resolution: {integrity: sha512-hpr+J05B2FVYUAXHeK1YyI267J/dDDhMU6B6civm8hSY1jYJnBXxzKDKDswzJmtLHryrjhnDjqqp/49t8FALew==}
@@ -2739,6 +2745,8 @@ snapshots:
   pify@2.3.0: {}
 
   pirates@4.0.7: {}
+
+  pocketbase@0.27.0: {}
 
   postcss-import@15.1.0(postcss@8.5.15):
     dependencies:

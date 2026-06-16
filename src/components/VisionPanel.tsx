@@ -1,37 +1,45 @@
 import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Vision } from '../db';
+import { usePB } from '../hooks/usePB';
+import { visionsApi, type Vision } from '../services/pb';
 
 export function VisionPanel() {
-  const visions = useLiveQuery(() => db.visions.orderBy('createdAt').toArray(), []);
+  const { data: visions, refetch } = usePB<Vision[]>(
+    () => visionsApi.list(),
+    [],
+    'visions'
+  );
+
   const [showForm, setShowForm] = useState(false);
   const [content, setContent] = useState('');
   const [targetYear, setTargetYear] = useState(new Date().getFullYear() + 3);
+  const [saving, setSaving] = useState(false);
 
   async function addVision() {
-    if (!content.trim()) return;
-    const id = crypto.randomUUID();
-    const vision: Vision = {
-      id,
-      content: content.trim(),
-      target_year: targetYear,
-      isActive: visions?.length === 0 ? 1 : 0,
-      createdAt: new Date(),
-    };
-    await db.visions.add(vision);
-    setContent('');
-    setShowForm(false);
+    if (!content.trim() || saving) return;
+    setSaving(true);
+    try {
+      const isFirst = !visions || visions.length === 0;
+      await visionsApi.create({
+        content: content.trim(),
+        target_year: targetYear,
+        isActive: isFirst,
+      });
+      setContent('');
+      setShowForm(false);
+      refetch();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function setActive(id: string) {
-    await db.transaction('rw', db.visions, async () => {
-      await db.visions.toCollection().modify({ isActive: 0 });
-      await db.visions.update(id, { isActive: 1 });
-    });
+    await visionsApi.setActive(id);
+    refetch();
   }
 
   async function deleteVision(id: string) {
-    await db.visions.delete(id);
+    await visionsApi.delete(id);
+    refetch();
   }
 
   const currentYear = new Date().getFullYear();
@@ -77,13 +85,15 @@ export function VisionPanel() {
           </div>
           <div className="flex justify-end gap-2">
             <button onClick={() => setShowForm(false)} className="btn-ghost">取消</button>
-            <button onClick={addVision} disabled={!content.trim()} className="btn-primary">保存愿景</button>
+            <button onClick={addVision} disabled={!content.trim() || saving} className="btn-primary">
+              {saving ? '保存中...' : '保存愿景'}
+            </button>
           </div>
         </div>
       )}
 
       <div className="space-y-3">
-        {visions?.length === 0 && (
+        {(!visions || visions.length === 0) && (
           <div className="card p-8 flex flex-col items-center justify-center text-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center text-2xl">🌠</div>
             <div>
@@ -106,9 +116,7 @@ export function VisionPanel() {
                       ACTIVE
                     </span>
                   ) : (
-                    <span className="bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md text-xs font-mono">
-                      DRAFT
-                    </span>
+                    <span className="bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md text-xs font-mono">DRAFT</span>
                   )}
                   <span className="text-xs font-mono text-zinc-500">目标 {v.target_year}</span>
                 </div>
@@ -116,16 +124,10 @@ export function VisionPanel() {
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {!v.isActive && (
-                  <button
-                    onClick={() => setActive(v.id!)}
-                    className="btn-ghost text-xs"
-                    title="设为当前愿景"
-                  >
-                    激活
-                  </button>
+                  <button onClick={() => setActive(v.id)} className="btn-ghost text-xs">激活</button>
                 )}
                 <button
-                  onClick={() => deleteVision(v.id!)}
+                  onClick={() => deleteVision(v.id)}
                   className="text-zinc-600 hover:text-red-400 w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-500/10 transition-all"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
