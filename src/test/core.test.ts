@@ -120,7 +120,7 @@ describe('PocketBase service layer', () => {
   it('tasksApi.create stores a task', async () => {
     const { tasksApi } = await import('../services/pb');
     const t = await tasksApi.create({
-      milestoneId: '', title: 'Write tests', description: '',
+      milestoneId: '', title: 'Write tests', description: '', why: '',
       priorityType: 'inbox', status: 'pending', targetDate: '', streakCount: 0,
     });
     expect(t.title).toBe('Write tests');
@@ -130,7 +130,7 @@ describe('PocketBase service layer', () => {
   it('tasksApi.update changes priorityType', async () => {
     const { tasksApi } = await import('../services/pb');
     const t = await tasksApi.create({
-      milestoneId: '', title: 'Promote me', description: '',
+      milestoneId: '', title: 'Promote me', description: '', why: '',
       priorityType: 'inbox', status: 'pending', targetDate: '', streakCount: 0,
     });
     const updated = await tasksApi.update(t.id, { priorityType: 'must' });

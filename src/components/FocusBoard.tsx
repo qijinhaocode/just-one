@@ -25,13 +25,38 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
   }
 
   const isCompleted = task.status === 'completed';
+  const isStale = (task.streakCount ?? 0) >= 3;
+  const isCriticallyStale = (task.streakCount ?? 0) >= 7;
 
   if (size === 'large') {
     return (
-      <div className={`relative card p-6 border-red-500/30 bg-gradient-to-br from-zinc-900 to-zinc-950 shadow-must transition-all duration-300 ${isCompleted ? 'opacity-70' : ''}`}>
+      <div className={`relative card p-6 transition-all duration-300
+        ${isCriticallyStale ? 'border-red-500/50 bg-gradient-to-br from-red-950/30 to-zinc-950 shadow-must' :
+          isStale ? 'border-amber-500/30 bg-gradient-to-br from-amber-950/20 to-zinc-950' :
+          'border-red-500/30 bg-gradient-to-br from-zinc-900 to-zinc-950 shadow-must'}
+        ${isCompleted ? 'opacity-70' : ''}`}
+      >
         {!isCompleted && (
-          <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-red-400 animate-pulse-slow" />
+          <div className={`absolute top-3 right-3 w-2 h-2 rounded-full animate-pulse-slow
+            ${isCriticallyStale ? 'bg-red-500' : 'bg-red-400'}`} />
         )}
+
+        {/* Procrastination warning banner */}
+        {isStale && !isCompleted && (
+          <div className={`flex items-center gap-2 mb-4 px-3 py-2 rounded-lg text-xs font-mono
+            ${isCriticallyStale
+              ? 'bg-red-500/15 border border-red-500/30 text-red-400'
+              : 'bg-amber-500/10 border border-amber-500/20 text-amber-400'}`}
+          >
+            <span>{isCriticallyStale ? '🚨' : '⚠️'}</span>
+            <span>
+              {isCriticallyStale
+                ? `已拖延 ${task.streakCount} 天 — 再不做就彻底失控了`
+                : `已拖延 ${task.streakCount} 天 — 今天必须解决`}
+            </span>
+          </div>
+        )}
+
         <div className="flex items-start gap-4">
           <button
             onClick={toggleComplete}
@@ -52,9 +77,11 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
             {task.description && (
               <p className="text-sm text-zinc-500 mt-2 leading-relaxed">{task.description}</p>
             )}
-            {task.streakCount > 0 && (
-              <div className="mt-3 flex items-center gap-1.5 text-xs text-amber-500 font-mono">
-                <span>⚠</span> 已连续拖延 {task.streakCount} 天
+            {/* Why anchor */}
+            {task.why && !isCompleted && (
+              <div className="mt-3 flex items-start gap-2 px-3 py-2 bg-zinc-800/60 border border-zinc-700/60 rounded-lg">
+                <span className="text-zinc-500 text-xs mt-0.5 shrink-0">因为</span>
+                <p className="text-xs text-zinc-300 leading-relaxed italic">{task.why}</p>
               </div>
             )}
           </div>
@@ -77,7 +104,10 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
   };
 
   return (
-    <div className={`card p-4 flex items-start gap-3 transition-all duration-150 hover:border-zinc-700 ${borderByType[task.priorityType]} ${isCompleted ? 'opacity-60' : ''}`}>
+    <div className={`card p-4 flex items-start gap-3 transition-all duration-150
+      ${isStale && !isCompleted ? 'border-amber-500/25 bg-amber-950/10' : `hover:border-zinc-700 ${borderByType[task.priorityType]}`}
+      ${isCompleted ? 'opacity-60' : ''}`}
+    >
       <button
         onClick={toggleComplete}
         className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all duration-300 shrink-0 mt-0.5
@@ -90,11 +120,25 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
         )}
       </button>
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium ${isCompleted ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
-          {task.title}
-        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className={`text-sm font-medium ${isCompleted ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
+            {task.title}
+          </p>
+          {isStale && !isCompleted && (
+            <span className={`text-xs font-mono px-1.5 py-0.5 rounded border shrink-0
+              ${isCriticallyStale
+                ? 'bg-red-500/15 text-red-400 border-red-500/25'
+                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}
+            >
+              拖延{task.streakCount}天
+            </span>
+          )}
+        </div>
         {task.description && (
           <p className="text-xs text-zinc-600 mt-0.5 truncate">{task.description}</p>
+        )}
+        {task.why && !isCompleted && (
+          <p className="text-xs text-zinc-500 mt-1 italic">因为：{task.why}</p>
         )}
       </div>
     </div>

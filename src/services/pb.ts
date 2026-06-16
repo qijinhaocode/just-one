@@ -37,6 +37,7 @@ export interface Task extends RecordModel {
   milestoneId: string;
   title: string;
   description: string;
+  why: string;           // Why this task matters — shown during execution
   priorityType: 'inbox' | 'must' | 'should' | 'could';
   status: 'pending' | 'completed' | 'dropped';
   targetDate: string;

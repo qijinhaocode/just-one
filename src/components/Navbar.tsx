@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Modal } from './Modal';
 import { clearAllData, checkConnection } from '../services/pb';
+import { WeeklyReport } from './WeeklyReport';
 
 interface NavbarProps {
   onApiConfigSaved: () => void;
@@ -9,6 +10,7 @@ interface NavbarProps {
 export function Navbar({ onApiConfigSaved }: NavbarProps) {
   const [apiModalOpen, setApiModalOpen] = useState(false);
   const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [weeklyOpen, setWeeklyOpen] = useState(false);
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
   const [apiEndpoint, setApiEndpoint] = useState(
     () => localStorage.getItem('gemini_endpoint') ||
@@ -69,6 +71,18 @@ export function Navbar({ onApiConfigSaved }: NavbarProps) {
         <span className="text-zinc-500 text-xs font-mono hidden sm:block">{dateStr}</span>
 
         <div className="flex items-center gap-2">
+          {/* Weekly report button — always visible on Friday, otherwise icon only */}
+          <button
+            onClick={() => setWeeklyOpen(true)}
+            className={`btn-ghost flex items-center gap-1.5 ${new Date().getDay() === 5 ? 'text-amber-400' : 'text-zinc-500'}`}
+            title="每周报告"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            {new Date().getDay() === 5 && <span className="text-xs">周报</span>}
+          </button>
           <button
             onClick={() => setApiModalOpen(true)}
             className={`btn-ghost flex items-center gap-1.5 ${hasApiKey ? 'text-emerald-400' : 'text-amber-400'}`}
@@ -87,6 +101,8 @@ export function Navbar({ onApiConfigSaved }: NavbarProps) {
           </button>
         </div>
       </header>
+
+      {weeklyOpen && <WeeklyReport onClose={() => setWeeklyOpen(false)} />}
 
       <Modal isOpen={apiModalOpen} onClose={() => setApiModalOpen(false)} title="API 配置">
         <div className="space-y-4">

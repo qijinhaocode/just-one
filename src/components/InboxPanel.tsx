@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { usePB } from '../hooks/usePB';
+import { useState } from 'react';import { usePB } from '../hooks/usePB';
 import { tasksApi, milestonesApi, type Task, type Milestone } from '../services/pb';
 import { GuidedCapture } from './GuidedCapture';
 
@@ -24,6 +23,7 @@ export function InboxPanel() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [why, setWhy] = useState('');
   const [milestoneId, setMilestoneId] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -39,6 +39,7 @@ export function InboxPanel() {
         milestoneId: milestoneId || '',
         title: title.trim(),
         description: description.trim(),
+        why: why.trim(),
         priorityType: 'inbox',
         status: 'pending',
         targetDate: '',
@@ -46,6 +47,7 @@ export function InboxPanel() {
       });
       setTitle('');
       setDescription('');
+      setWhy('');
       setMilestoneId('');
       setShowForm(false);
       refetch();
@@ -61,6 +63,7 @@ export function InboxPanel() {
           milestoneId: '',
           title: item.text,
           description: '',
+          why: '',
           priorityType: 'inbox',
           status: 'pending',
           targetDate: '',
@@ -154,6 +157,17 @@ export function InboxPanel() {
               placeholder="补充说明..."
               value={description}
               onChange={e => setDescription(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-zinc-400 block mb-1.5">
+              为什么重要？<span className="text-zinc-600 font-normal ml-1">执行时显示，帮你对抗拖延（可选）</span>
+            </label>
+            <input
+              className="input-field"
+              placeholder="例如：这是MVP上线的最后一块拼图..."
+              value={why}
+              onChange={e => setWhy(e.target.value)}
             />
           </div>
           {milestones && milestones.length > 0 && (
@@ -268,10 +282,21 @@ function TaskRow({ task, idx, editingId, editTitle, setEditTitle, setEditingId, 
   const tagClass: Record<Task['priorityType'], string> = {
     inbox: 'tag-inbox', must: 'tag-must', should: 'tag-should', could: 'tag-could',
   };
+  const isStale = (task.streakCount ?? 0) >= 3;
+  const isCritical = (task.streakCount ?? 0) >= 7;
+  const [editingWhy, setEditingWhy] = useState(false);
+  const [whyVal, setWhyVal] = useState(task.why ?? '');
+
+  async function saveWhy() {
+    await tasksApi.update(task.id, { why: whyVal.trim() });
+    setEditingWhy(false);
+  }
 
   return (
-    <div className="card p-3 flex items-center gap-3 hover:border-zinc-700 transition-all group">
-      <span className="text-xs font-mono text-zinc-700 w-5 text-right shrink-0">{idx + 1}</span>
+    <div className={`card p-3 flex items-start gap-3 transition-all group
+      ${isCritical ? 'border-red-500/25 bg-red-950/10' : isStale ? 'border-amber-500/20 bg-amber-950/10' : 'hover:border-zinc-700'}`}
+    >
+      <span className="text-xs font-mono text-zinc-700 w-5 text-right shrink-0 mt-0.5">{idx + 1}</span>
       <div className="flex-1 min-w-0">
         {editingId === task.id ? (
           <div className="flex gap-2">
@@ -286,23 +311,63 @@ function TaskRow({ task, idx, editingId, editTitle, setEditTitle, setEditingId, 
             <button onClick={() => setEditingId(null)} className="btn-ghost text-xs">取消</button>
           </div>
         ) : (
-          <p
-            className="text-sm text-zinc-200 truncate cursor-pointer"
-            onDoubleClick={() => { setEditingId(task.id); setEditTitle(task.title); }}
-            title="双击编辑"
-          >
-            {task.title}
-          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p
+              className="text-sm text-zinc-200 cursor-pointer hover:text-white"
+              onDoubleClick={() => { setEditingId(task.id); setEditTitle(task.title); }}
+              title="双击编辑标题"
+            >
+              {task.title}
+            </p>
+            {isCritical && (
+              <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/25">
+                🚨 拖延{task.streakCount}天
+              </span>
+            )}
+            {isStale && !isCritical && (
+              <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                ⚠ 拖延{task.streakCount}天
+              </span>
+            )}
+          </div>
         )}
         {task.description && <p className="text-xs text-zinc-500 mt-0.5 truncate">{task.description}</p>}
-        {task.streakCount > 0 && (
-          <span className="text-xs text-amber-500 font-mono">⚠ 已拖延 {task.streakCount} 天</span>
+
+        {/* Why anchor — inline edit */}
+        {editingWhy ? (
+          <div className="flex gap-2 mt-1.5">
+            <input
+              className="input-field text-xs py-1 flex-1"
+              placeholder="这件事为什么重要？"
+              value={whyVal}
+              onChange={e => setWhyVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') saveWhy(); if (e.key === 'Escape') setEditingWhy(false); }}
+              autoFocus
+            />
+            <button onClick={saveWhy} className="btn-primary text-xs px-2 py-1">保存</button>
+            <button onClick={() => setEditingWhy(false)} className="btn-ghost text-xs">取消</button>
+          </div>
+        ) : task.why ? (
+          <p
+            className="text-xs text-zinc-500 mt-1 italic cursor-pointer hover:text-zinc-400"
+            onClick={() => { setEditingWhy(true); setWhyVal(task.why); }}
+            title="点击编辑"
+          >
+            因为：{task.why}
+          </p>
+        ) : (
+          <button
+            onClick={() => setEditingWhy(true)}
+            className="text-xs text-zinc-700 hover:text-zinc-500 mt-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all"
+          >
+            + 添加「为什么重要」
+          </button>
         )}
       </div>
 
       {/* Priority selector */}
       <select
-        className="bg-transparent border-none text-xs font-mono cursor-pointer outline-none"
+        className="bg-transparent border-none text-xs font-mono cursor-pointer outline-none shrink-0"
         value={task.priorityType}
         onChange={e => changePriority(task.id, e.target.value as Task['priorityType'])}
         title="手动调整优先级"

@@ -7,6 +7,7 @@ import { InboxPanel } from './components/InboxPanel';
 import { FocusBoard } from './components/FocusBoard';
 import { EveningReview } from './components/EveningReview';
 import { MorningRitual } from './components/MorningRitual';
+import { WeeklyReport } from './components/WeeklyReport';
 import { usePB } from './hooks/usePB';
 import { visionsApi, milestonesApi, tasksApi, type DailyReviewPayload } from './services/pb';
 import { computeStreak, type StreakData } from './services/streak';
@@ -32,6 +33,7 @@ export default function App() {
   const [apiVersion, setApiVersion] = useState(0);
   const [streak, setStreak] = useState<StreakData | null>(null);
   const [showRitual, setShowRitual] = useState(false);
+  const [showWeekly, setShowWeekly] = useState(false);
 
   // ── Re-evaluate day phase every minute ──────────────────────────────────────
   useEffect(() => {
@@ -63,6 +65,22 @@ export default function App() {
         setShowRitual(true);
       }
     });
+
+    // Auto-prompt weekly report on Friday evenings, once per week
+    const isFriday = new Date().getDay() === 5;
+    const lastWeeklyPrompt = localStorage.getItem('last_weekly_prompt');
+    const thisWeekKey = (() => {
+      const d = new Date();
+      const day = d.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      const mon = new Date(d);
+      mon.setDate(d.getDate() + diff);
+      return mon.toISOString().split('T')[0];
+    })();
+    if (isFriday && lastWeeklyPrompt !== thisWeekKey && getDayPhase() === 'evening') {
+      localStorage.setItem('last_weekly_prompt', thisWeekKey);
+      setShowWeekly(true);
+    }
   }, []);
 
   // Re-compute streak whenever daily_reviews changes (e.g. after evening review)
@@ -223,6 +241,10 @@ export default function App() {
       {/* Morning ritual overlay */}
       {showRitual && (
         <MorningRitual streak={streak} onDismiss={dismissRitual} />
+      )}
+      {/* Weekly report overlay (auto on Friday evening) */}
+      {showWeekly && (
+        <WeeklyReport onClose={() => setShowWeekly(false)} />
       )}
       <Navbar onApiConfigSaved={() => setApiVersion(v => v + 1)} />
       <div className="flex flex-1 overflow-hidden" key={apiVersion}>
