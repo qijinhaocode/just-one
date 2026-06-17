@@ -126,6 +126,11 @@ export const authApi = {
     pb.authStore.clear();
   },
 
+  /** Re-send the email verification link. */
+  async resendVerification(email: string): Promise<void> {
+    await pb.collection('users').requestVerification(email);
+  },
+
   /** Refresh the auth token (call on app startup to restore session). */
   async refresh(): Promise<boolean> {
     if (!pb.authStore.isValid) return false;

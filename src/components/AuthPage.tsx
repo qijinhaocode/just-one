@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Mail, Lock, User, Loader2, Zap, AlertCircle } from 'lucide-react'
+import { Mail, Lock, User, Loader2, Zap, AlertCircle, MailCheck, RefreshCw } from 'lucide-react'
 import { authApi } from '../services/pb'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -15,6 +15,10 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // After register: show "check your email" screen
+  const [pendingVerification, setPendingVerification] = useState(false)
+  const [resendLoading, setResendLoading] = useState(false)
+  const [resendSuccess, setResendSuccess] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -24,15 +28,22 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
     try {
       if (mode === 'register') {
         await authApi.register(email.trim(), password, name.trim() || undefined)
+        // PocketBase will throw if email verification is required and user isn't verified yet.
+        // If we reach here without throwing, verification is off — go straight in.
+        onAuthenticated()
       } else {
         await authApi.login(email.trim(), password)
+        onAuthenticated()
       }
-      onAuthenticated()
     } catch (err) {
       const msg = err instanceof Error ? err.message : '操作失败，请重试'
-      // Make PocketBase error messages friendlier
-      if (msg.includes('Failed to authenticate')) {
+      if (msg.includes('verify') || msg.includes('verified') || msg.includes('verification')) {
+        // Registration succeeded but email verification is required
+        setPendingVerification(true)
+      } else if (msg.includes('Failed to authenticate')) {
         setError('邮箱或密码错误')
+      } else if (msg.includes('not verified')) {
+        setError('邮箱尚未验证，请检查你的邮箱并点击验证链接')
       } else if (msg.includes('already exists')) {
         setError('该邮箱已注册，请直接登录')
       } else if (msg.includes('password')) {
@@ -45,6 +56,83 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
     }
   }
 
+  async function handleResend() {
+    setResendLoading(true)
+    setResendSuccess(false)
+    try {
+      await authApi.resendVerification(email.trim())
+      setResendSuccess(true)
+    } catch {
+      // silently ignore
+    } finally {
+      setResendLoading(false)
+    }
+  }
+
+  // ── Email verification pending screen ────────────────────────────────────────
+  if (pendingVerification) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm space-y-8">
+          <div className="text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-zinc-100 to-zinc-400 flex items-center justify-center mx-auto">
+              <span className="text-zinc-900 font-black text-xl font-mono">1</span>
+            </div>
+            <h1 className="text-2xl font-bold text-zinc-100">JustOne AI</h1>
+          </div>
+
+          <div className="card p-8 text-center space-y-5">
+            <div className="w-14 h-14 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto">
+              <MailCheck className="w-7 h-7 text-blue-400" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-base font-semibold text-zinc-100">验证邮件已发送</h2>
+              <p className="text-sm text-zinc-500 leading-relaxed">
+                我们向 <span className="text-zinc-300 font-mono">{email}</span> 发送了一封验证邮件。
+              </p>
+              <p className="text-sm text-zinc-600">
+                点击邮件中的链接后，回来登录即可。
+              </p>
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <Button
+                className="w-full"
+                onClick={() => {
+                  setPendingVerification(false)
+                  setMode('login')
+                }}
+              >
+                去登录
+              </Button>
+
+              <div className="flex items-center justify-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResend}
+                  disabled={resendLoading || resendSuccess}
+                  className="text-zinc-500"
+                >
+                  {resendLoading
+                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> 发送中...</>
+                    : resendSuccess
+                    ? <><MailCheck className="w-3.5 h-3.5 text-emerald-400" /> 已重新发送</>
+                    : <><RefreshCw className="w-3.5 h-3.5" /> 重新发送验证邮件</>}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <p className="text-xs text-center text-zinc-700">
+            没收到邮件？检查垃圾箱，或联系管理员
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Login / Register form ─────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-8">
