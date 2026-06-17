@@ -8,8 +8,9 @@ import { FocusBoard } from './components/FocusBoard';
 import { EveningReview } from './components/EveningReview';
 import { MorningRitual } from './components/MorningRitual';
 import { WeeklyReport } from './components/WeeklyReport';
+import { AuthPage } from './components/AuthPage';
 import { usePB } from './hooks/usePB';
-import { visionsApi, milestonesApi, tasksApi, reviewsApi, type DailyReviewPayload } from './services/pb';
+import { authApi, visionsApi, milestonesApi, tasksApi, reviewsApi, type DailyReviewPayload } from './services/pb';
 import { computeStreak, type StreakData } from './services/streak';
 
 // ── Dashboard lazy load (OUTSIDE App to keep stable component identity) ───────
@@ -24,6 +25,7 @@ function getDayPhase(): 'morning' | 'evening' {
 
 // ── App ────────────────────────────────────────────────────────────────────────
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null); // null = checking
   const [activeStep, setActiveStep] = useState<SidebarStep>('inbox');
   const [dayPhase, setDayPhase] = useState<'morning' | 'evening'>(getDayPhase);
   const [notToDoRules, setNotToDoRules] = useState<string[]>([]);
@@ -34,6 +36,11 @@ export default function App() {
   const [streak, setStreak] = useState<StreakData | null>(null);
   const [showRitual, setShowRitual] = useState(false);
   const [showWeekly, setShowWeekly] = useState(false);
+
+  // ── Auth check on mount ──────────────────────────────────────────────────────
+  useEffect(() => {
+    authApi.refresh().then(ok => setIsLoggedIn(ok));
+  }, []);
 
   // ── Re-evaluate day phase every minute ──────────────────────────────────────
   useEffect(() => {
@@ -276,6 +283,18 @@ export default function App() {
     setShowRitual(false);
   }
 
+  // ── Auth gate ────────────────────────────────────────────────────────────────
+  if (isLoggedIn === null) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-zinc-700 border-t-zinc-300 animate-spin" />
+      </div>
+    );
+  }
+  if (!isLoggedIn) {
+    return <AuthPage onAuthenticated={() => setIsLoggedIn(true)} />;
+  }
+
   return (
     <div className="h-screen flex flex-col bg-zinc-950 overflow-hidden">
       {/* Morning ritual overlay */}
@@ -286,7 +305,10 @@ export default function App() {
       {showWeekly && (
         <WeeklyReport onClose={() => setShowWeekly(false)} />
       )}
-      <Navbar onApiConfigSaved={() => setApiVersion(v => v + 1)} />
+      <Navbar
+        onApiConfigSaved={() => setApiVersion(v => v + 1)}
+        onLogout={() => setIsLoggedIn(false)}
+      />
       <div className="flex flex-1 overflow-hidden" key={apiVersion}>
         <Sidebar
           activeStep={activeStep}

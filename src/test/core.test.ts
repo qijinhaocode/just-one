@@ -20,6 +20,12 @@ vi.mock('pocketbase', () => {
   class MockPB {
     _cols: Record<string, MockCollection> = {};
     autoCancellation() {}
+    // Mock authStore so withUser() works in tests
+    authStore = {
+      model: { id: 'test-user-id', email: 'test@test.com' },
+      isValid: true,
+      clear() {},
+    };
     collection(name: string) {
       if (!this._cols[name]) this._cols[name] = new MockCollection(name);
       return this._cols[name];

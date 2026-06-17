@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  Key, Trash2, BarChart2, CheckCircle2, AlertCircle, Database
+  Key, Trash2, BarChart2, CheckCircle2, AlertCircle, Database, LogOut, User
 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -8,14 +8,15 @@ import {
 } from './ui/dialog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
-import { clearAllData, checkConnection } from '../services/pb'
+import { clearAllData, checkConnection, authApi } from '../services/pb'
 import { WeeklyReport } from './WeeklyReport'
 
 interface NavbarProps {
   onApiConfigSaved: () => void
+  onLogout: () => void
 }
 
-export function Navbar({ onApiConfigSaved }: NavbarProps) {
+export function Navbar({ onApiConfigSaved, onLogout }: NavbarProps) {
   const [apiOpen, setApiOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const [weeklyOpen, setWeeklyOpen] = useState(false)
@@ -111,6 +112,22 @@ export function Navbar({ onApiConfigSaved }: NavbarProps) {
           <Button variant="ghost" size="icon" onClick={() => setClearOpen(true)} title="清空所有数据">
             <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
           </Button>
+          {/* User + logout */}
+          <div className="flex items-center gap-1.5 ml-1 pl-1.5 border-l border-zinc-800">
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+              <User className="w-3 h-3" />
+              <span className="font-mono truncate max-w-[100px]">
+                {authApi.currentUser?.name || authApi.currentUser?.email || 'User'}
+              </span>
+            </div>
+            <Button
+              variant="ghost" size="icon"
+              onClick={() => { authApi.logout(); onLogout(); }}
+              title="退出登录"
+            >
+              <LogOut className="w-3.5 h-3.5 text-zinc-500" />
+            </Button>
+          </div>
         </div>
       </header>
 

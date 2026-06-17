@@ -1,29 +1,29 @@
 /**
- * PocketBase service layer — replaces Dexie/IndexedDB.
+ * PocketBase service layer — multi-user edition.
  *
- * All data is stored in PocketBase (SQLite) at http://127.0.0.1:8090.
- * The server must be running (`./start-pb.sh`) before using this app.
+ * Auth: PocketBase's built-in users collection.
+ * Data isolation: PocketBase Rules enforce "user = @request.auth.id" on every
+ * collection. The JS SDK automatically sends the auth token on every request
+ * once pb.authStore is populated — no manual header management needed.
  *
- * Collections:
- *   visions        – long-term vision records
- *   milestones     – mid-term milestone records
- *   tasks          – all tasks (inbox/must/should/could)
- *   daily_reviews  – evening review + AI insight records
+ * Collections: visions · milestones · tasks · daily_reviews · task_templates
  */
 
-import PocketBase, { type RecordModel } from 'pocketbase';
+import PocketBase, { type RecordModel, type AuthModel } from 'pocketbase';
 
-export const pb = new PocketBase('http://127.0.0.1:8090');
-
-// Disable PocketBase's auto-cancel on duplicate requests (causes issues with React Strict Mode)
+// ── PocketBase instance ───────────────────────────────────────────────────────
+// URL can be overridden by users deploying to their own server
+const PB_URL = localStorage.getItem('pb_url') || 'http://127.0.0.1:8090';
+export const pb = new PocketBase(PB_URL);
 pb.autoCancellation(false);
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Vision extends RecordModel {
   content: string;
   target_year: number;
   isActive: boolean;
+  user: string;
 }
 
 export interface Milestone extends RecordModel {
@@ -31,6 +31,7 @@ export interface Milestone extends RecordModel {
   title: string;
   timeFrame: string;
   status: 'pending' | 'completed' | 'archived';
+  user: string;
 }
 
 export interface Task extends RecordModel {
@@ -42,8 +43,9 @@ export interface Task extends RecordModel {
   status: 'pending' | 'completed' | 'dropped';
   targetDate: string;
   streakCount: number;
-  estimatedMinutes: number; // 0 = not set
-  actualMinutes: number;    // 0 = not recorded yet
+  estimatedMinutes: number;
+  actualMinutes: number;
+  user: string;
 }
 
 export interface DailyReview extends RecordModel {
@@ -53,10 +55,10 @@ export interface DailyReview extends RecordModel {
   reflectionQ2: string;
   aiInsight: string;
   focusScore: number;
-  ai_analyzed_at: string; // ISO datetime string; empty = not yet analyzed today
+  ai_analyzed_at: string;
+  user: string;
 }
 
-/** Plain payload for creating/updating a review — no RecordModel metadata needed */
 export interface DailyReviewPayload {
   date: string;
   mustCompleted: boolean;
@@ -67,15 +69,77 @@ export interface DailyReviewPayload {
   ai_analyzed_at?: string;
 }
 
-// ─── Connection check ─────────────────────────────────────────────────────────
-
 export interface TaskTemplate extends RecordModel {
   title: string;
   description: string;
   why: string;
   category: string;
   useCount: number;
+  user: string;
 }
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+
+/** Returns the current user ID, throws if not authenticated. */
+function uid(): string {
+  const id = pb.authStore.model?.id;
+  if (!id) throw new Error('Not authenticated');
+  return id;
+}
+
+/** Injects user into a create payload. */
+function withUser<T extends object>(data: T): T & { user: string } {
+  return { ...data, user: uid() };
+}
+
+// ── Auth API ──────────────────────────────────────────────────────────────────
+
+export const authApi = {
+  /** Current user record, or null if not logged in. */
+  get currentUser(): AuthModel | null {
+    return pb.authStore.isValid ? pb.authStore.model : null;
+  },
+
+  get isLoggedIn(): boolean {
+    return pb.authStore.isValid;
+  },
+
+  async register(email: string, password: string, name?: string): Promise<void> {
+    await pb.collection('users').create({
+      email,
+      password,
+      passwordConfirm: password,
+      name: name || email.split('@')[0],
+    });
+    await this.login(email, password);
+  },
+
+  async login(email: string, password: string): Promise<void> {
+    await pb.collection('users').authWithPassword(email, password);
+  },
+
+  async loginWithOAuth(provider: string): Promise<void> {
+    await pb.collection('users').authWithOAuth2({ provider });
+  },
+
+  logout(): void {
+    pb.authStore.clear();
+  },
+
+  /** Refresh the auth token (call on app startup to restore session). */
+  async refresh(): Promise<boolean> {
+    if (!pb.authStore.isValid) return false;
+    try {
+      await pb.collection('users').authRefresh();
+      return true;
+    } catch {
+      pb.authStore.clear();
+      return false;
+    }
+  },
+};
+
+// ── Connection check ──────────────────────────────────────────────────────────
 
 export async function checkConnection(): Promise<boolean> {
   try {
@@ -86,28 +150,23 @@ export async function checkConnection(): Promise<boolean> {
   }
 }
 
-// ─── Visions ─────────────────────────────────────────────────────────────────
+// ── Visions ───────────────────────────────────────────────────────────────────
 
 export const visionsApi = {
   async list(): Promise<Vision[]> {
-    const res = await pb.collection('visions').getList<Vision>(1, 200, {
-      sort: 'created',
-    });
+    const res = await pb.collection('visions').getList<Vision>(1, 200, { sort: 'created' });
     return res.items;
   },
 
   async create(data: { content: string; target_year: number; isActive: boolean }): Promise<Vision> {
-    return pb.collection('visions').create<Vision>(data);
+    return pb.collection('visions').create<Vision>(withUser(data));
   },
 
   async setActive(id: string): Promise<void> {
-    // Deactivate all, then activate the chosen one
     const all = await pb.collection('visions').getList<Vision>(1, 200);
-    await Promise.all(
-      all.items
-        .filter(v => v.isActive)
-        .map(v => pb.collection('visions').update(v.id, { isActive: false }))
-    );
+    await Promise.all(all.items.filter(v => v.isActive).map(v =>
+      pb.collection('visions').update(v.id, { isActive: false })
+    ));
     await pb.collection('visions').update(id, { isActive: true });
   },
 
@@ -126,20 +185,17 @@ export const visionsApi = {
   },
 };
 
-// ─── Milestones ───────────────────────────────────────────────────────────────
+// ── Milestones ────────────────────────────────────────────────────────────────
 
 export const milestonesApi = {
   async list(statusFilter?: string): Promise<Milestone[]> {
     const filter = statusFilter ? `status = "${statusFilter}"` : '';
-    const res = await pb.collection('milestones').getList<Milestone>(1, 500, {
-      sort: '-created',
-      filter,
-    });
+    const res = await pb.collection('milestones').getList<Milestone>(1, 500, { sort: '-created', filter });
     return res.items;
   },
 
   async create(data: Omit<Milestone, keyof RecordModel>): Promise<Milestone> {
-    return pb.collection('milestones').create<Milestone>(data);
+    return pb.collection('milestones').create<Milestone>(withUser(data));
   },
 
   async updateStatus(id: string, status: Milestone['status']): Promise<void> {
@@ -147,13 +203,10 @@ export const milestonesApi = {
   },
 
   async delete(id: string): Promise<void> {
-    // Orphan tasks: clear their milestoneId
     const orphans = await pb.collection('tasks').getList<Task>(1, 500, {
       filter: `milestoneId = "${id}"`,
     });
-    await Promise.all(
-      orphans.items.map(t => pb.collection('tasks').update(t.id, { milestoneId: '' }))
-    );
+    await Promise.all(orphans.items.map(t => pb.collection('tasks').update(t.id, { milestoneId: '' })));
     await pb.collection('milestones').delete(id);
   },
 
@@ -168,7 +221,7 @@ export const milestonesApi = {
   },
 };
 
-// ─── Tasks ────────────────────────────────────────────────────────────────────
+// ── Tasks ─────────────────────────────────────────────────────────────────────
 
 export const tasksApi = {
   async list(filter?: string): Promise<Task[]> {
@@ -180,7 +233,7 @@ export const tasksApi = {
   },
 
   async create(data: Omit<Task, keyof RecordModel>): Promise<Task> {
-    return pb.collection('tasks').create<Task>(data);
+    return pb.collection('tasks').create<Task>(withUser(data));
   },
 
   async update(id: string, data: Partial<Omit<Task, keyof RecordModel>>): Promise<Task> {
@@ -191,39 +244,25 @@ export const tasksApi = {
     await pb.collection('tasks').delete(id);
   },
 
-  /** Demote all current must/should/could back to inbox before a new AI run */
   async resetPriorityToInbox(): Promise<void> {
     const promoted = await pb.collection('tasks').getList<Task>(1, 1000, {
       filter: 'priorityType != "inbox" && status != "dropped"',
     });
-    await Promise.all(
-      promoted.items.map(t =>
-        pb.collection('tasks').update(t.id, { priorityType: 'inbox', targetDate: '' })
-      )
-    );
+    await Promise.all(promoted.items.map(t =>
+      pb.collection('tasks').update(t.id, { priorityType: 'inbox', targetDate: '' })
+    ));
   },
 
-  /** Increment streakCount for all non-dropped, non-completed inbox/must/should/could tasks
-   *  that had a targetDate of yesterday (or earlier). Called once on app startup. */
   async incrementStaleStreaks(): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
     const stale = await pb.collection('tasks').getList<Task>(1, 1000, {
       filter: `status = "pending" && targetDate != "" && targetDate < "${today}"`,
     });
-    await Promise.all(
-      stale.items.map(t =>
-        pb.collection('tasks').update(t.id, { streakCount: (t.streakCount ?? 0) + 1, targetDate: '' })
-      )
-    );
+    await Promise.all(stale.items.map(t =>
+      pb.collection('tasks').update(t.id, { streakCount: (t.streakCount ?? 0) + 1, targetDate: '' })
+    ));
   },
 
-  /**
-   * Carry over yesterday's unfinished must/should/could tasks to today.
-   * - Updates targetDate to today
-   * - If today already has a must task, demotes yesterday's must → should
-   * - Increments streakCount for each carried task
-   * Returns the number of tasks carried over.
-   */
   async carryOverYesterday(): Promise<number> {
     const today = new Date().toISOString().split('T')[0];
     const yesterday = (() => {
@@ -232,29 +271,24 @@ export const tasksApi = {
       return d.toISOString().split('T')[0];
     })();
 
-    // Find yesterday's unfinished priority tasks
     const stale = await pb.collection('tasks').getList<Task>(1, 200, {
       filter: `status = "pending" && priorityType != "inbox" && targetDate = "${yesterday}"`,
     });
     if (stale.items.length === 0) return 0;
 
-    // Check if today already has a must task
     const todayMust = await pb.collection('tasks').getList<Task>(1, 1, {
       filter: `priorityType = "must" && status != "dropped" && (targetDate = "${today}" || targetDate = "")`,
     });
     const hasTodayMust = todayMust.totalItems > 0;
 
-    await Promise.all(
-      stale.items.map(t => {
-        const newPriority =
-          t.priorityType === 'must' && hasTodayMust ? 'should' : t.priorityType;
-        return pb.collection('tasks').update(t.id, {
-          targetDate: today,
-          priorityType: newPriority,
-          streakCount: (t.streakCount ?? 0) + 1,
-        });
-      })
-    );
+    await Promise.all(stale.items.map(t => {
+      const newPriority = t.priorityType === 'must' && hasTodayMust ? 'should' : t.priorityType;
+      return pb.collection('tasks').update(t.id, {
+        targetDate: today,
+        priorityType: newPriority,
+        streakCount: (t.streakCount ?? 0) + 1,
+      });
+    }));
 
     return stale.items.length;
   },
@@ -273,55 +307,35 @@ export const tasksApi = {
   },
 };
 
-// ─── Daily Reviews ────────────────────────────────────────────────────────────
+// ── Daily Reviews ─────────────────────────────────────────────────────────────
 
 export const reviewsApi = {
   async list(limit = 30): Promise<DailyReview[]> {
-    const res = await pb.collection('daily_reviews').getList<DailyReview>(1, limit, {
-      sort: '-date',
-    });
+    const res = await pb.collection('daily_reviews').getList<DailyReview>(1, limit, { sort: '-date' });
     return res.items;
   },
 
   async getByDate(date: string): Promise<DailyReview | null> {
     try {
-      return await pb.collection('daily_reviews').getFirstListItem<DailyReview>(
-        `date = "${date}"`
-      );
-    } catch {
-      return null;
-    }
+      return await pb.collection('daily_reviews').getFirstListItem<DailyReview>(`date = "${date}"`);
+    } catch { return null; }
   },
 
-  /**
-   * Check whether AI alignment has already run today.
-   * Returns the timestamp string if analyzed, null if not.
-   */
   async checkTodayAnalyzed(date: string): Promise<string | null> {
     const review = await this.getByDate(date);
-    if (!review) return null;
-    return review.ai_analyzed_at || null;
+    return review?.ai_analyzed_at || null;
   },
 
-  /**
-   * Record that AI alignment ran today.
-   * Creates or updates the daily_reviews row for today.
-   */
   async markTodayAnalyzed(date: string): Promise<void> {
     const now = new Date().toISOString();
     const existing = await this.getByDate(date);
     if (existing) {
       await pb.collection('daily_reviews').update(existing.id, { ai_analyzed_at: now });
     } else {
-      await pb.collection('daily_reviews').create({
-        date,
-        mustCompleted: false,
-        reflectionQ1: '',
-        reflectionQ2: '',
-        aiInsight: '',
-        focusScore: 0,
-        ai_analyzed_at: now,
-      });
+      await pb.collection('daily_reviews').create(withUser({
+        date, mustCompleted: false, reflectionQ1: '', reflectionQ2: '',
+        aiInsight: '', focusScore: 0, ai_analyzed_at: now,
+      }));
     }
   },
 
@@ -330,7 +344,7 @@ export const reviewsApi = {
     if (existing) {
       return pb.collection('daily_reviews').update<DailyReview>(existing.id, data);
     }
-    return pb.collection('daily_reviews').create<DailyReview>(data);
+    return pb.collection('daily_reviews').create<DailyReview>(withUser(data));
   },
 
   subscribe(callback: (items: DailyReview[]) => void): () => void {
@@ -344,7 +358,7 @@ export const reviewsApi = {
   },
 };
 
-// ─── Task Templates ───────────────────────────────────────────────────────────
+// ── Task Templates ────────────────────────────────────────────────────────────
 
 export const templatesApi = {
   async list(): Promise<TaskTemplate[]> {
@@ -355,34 +369,29 @@ export const templatesApi = {
   },
 
   async create(data: Omit<TaskTemplate, keyof RecordModel>): Promise<TaskTemplate> {
-    return pb.collection('task_templates').create<TaskTemplate>(data);
+    return pb.collection('task_templates').create<TaskTemplate>(withUser(data));
   },
 
   async delete(id: string): Promise<void> {
     await pb.collection('task_templates').delete(id);
   },
 
-  /** Increment useCount and return a new Task payload ready to create */
   async useTemplate(id: string): Promise<Omit<Task, keyof RecordModel>> {
     const t = await pb.collection('task_templates').getOne<TaskTemplate>(id);
     await pb.collection('task_templates').update(id, { useCount: (t.useCount ?? 0) + 1 });
     return {
-      milestoneId: '',
-      title: t.title,
-      description: t.description ?? '',
-      why: t.why ?? '',
-      priorityType: 'inbox',
-      status: 'pending',
-      targetDate: '',
-      streakCount: 0,
-      estimatedMinutes: 0,
-      actualMinutes: 0,
+      milestoneId: '', title: t.title, description: t.description ?? '',
+      why: t.why ?? '', priorityType: 'inbox', status: 'pending',
+      targetDate: '', streakCount: 0, estimatedMinutes: 0, actualMinutes: 0,
+      user: uid(),
     };
   },
 
   subscribe(callback: (items: TaskTemplate[]) => void): () => void {
     const refresh = async () => {
-      const res = await pb.collection('task_templates').getList<TaskTemplate>(1, 200, { sort: '-useCount,-created' });
+      const res = await pb.collection('task_templates').getList<TaskTemplate>(1, 200, {
+        sort: '-useCount,-created',
+      });
       callback(res.items);
     };
     pb.collection('task_templates').subscribe('*', () => refresh());
@@ -391,7 +400,7 @@ export const templatesApi = {
   },
 };
 
-// ─── Clear all data ───────────────────────────────────────────────────────────
+// ── Clear all data ────────────────────────────────────────────────────────────
 
 export async function clearAllData(): Promise<void> {
   const [visions, milestones, tasks, reviews] = await Promise.all([
@@ -408,7 +417,7 @@ export async function clearAllData(): Promise<void> {
   ]);
 }
 
-// ─── Export all data ──────────────────────────────────────────────────────────
+// ── Export all data ───────────────────────────────────────────────────────────
 
 export async function exportAllData(): Promise<string> {
   const [visions, milestones, tasks, reviews] = await Promise.all([
