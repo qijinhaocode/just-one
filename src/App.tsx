@@ -9,7 +9,7 @@ import { EveningReview } from './components/EveningReview';
 import { MorningRitual } from './components/MorningRitual';
 import { WeeklyReport } from './components/WeeklyReport';
 import { usePB } from './hooks/usePB';
-import { visionsApi, milestonesApi, tasksApi, type DailyReviewPayload } from './services/pb';
+import { visionsApi, milestonesApi, tasksApi, reviewsApi, type DailyReviewPayload } from './services/pb';
 import { computeStreak, type StreakData } from './services/streak';
 
 // ── Dashboard lazy load (OUTSIDE App to keep stable component identity) ───────
@@ -60,7 +60,6 @@ export default function App() {
 
     computeStreak().then(data => {
       setStreak(data);
-      // Show morning ritual once per day, only in morning phase
       if (lastRitual !== today && getDayPhase() === 'morning') {
         setShowRitual(true);
       }
@@ -83,6 +82,42 @@ export default function App() {
     }
   }, []);
 
+  // ── Auto AI analysis on startup ───────────────────────────────────────────────
+  // Runs once on mount (morning only). Skips if:
+  //   1. No API key configured
+  //   2. No inbox tasks to analyze
+  //   3. Already analyzed today (ai_analyzed_at exists in daily_reviews)
+  //   4. Evening phase (user is reviewing, not planning)
+  useEffect(() => {
+    if (getDayPhase() !== 'morning') return;
+    const apiKey = localStorage.getItem('gemini_api_key');
+    if (!apiKey) return;
+
+    const today = new Date().toISOString().split('T')[0];
+
+    async function tryAutoAnalyze() {
+      try {
+        // Check if already analyzed today via PocketBase
+        const alreadyAnalyzed = await reviewsApi.checkTodayAnalyzed(today);
+        if (alreadyAnalyzed) return;
+
+        // Check if there are inbox tasks
+        const inboxTasks = await tasksApi.list(
+          'priorityType = "inbox" && status != "dropped"'
+        );
+        if (inboxTasks.length === 0) return;
+
+        // All conditions met — run AI alignment automatically
+        await runAIAlignment(today);
+      } catch {
+        // Silent fail — auto analysis is best-effort
+      }
+    }
+
+    tryAutoAnalyze();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Re-compute streak whenever daily_reviews changes (e.g. after evening review)
   const { data: _reviewTrigger } = usePB<number>(
     () => computeStreak().then(data => { setStreak(data); return 0; }),
@@ -102,7 +137,61 @@ export default function App() {
     [], 'tasks'
   );
 
-  // ── AI alignment ─────────────────────────────────────────────────────────────
+  // ── AI alignment core (shared by manual button and auto-trigger) ─────────────
+  async function runAIAlignment(today: string) {
+    const { runAlignment } = await import('./services/gemini');
+
+    const [visions, milestones, tasks] = await Promise.all([
+      visionsApi.list().then(r => r.filter(v => v.isActive)),
+      milestonesApi.list('pending'),
+      tasksApi.list('priorityType = "inbox" && status != "dropped"'),
+    ]);
+
+    if (tasks.length === 0) return;
+
+    const geminiVisions = visions.map(v => ({
+      id: v.id, content: v.content, target_year: v.target_year,
+      isActive: v.isActive ? 1 : 0, createdAt: new Date(v.created),
+    }));
+    const geminiMilestones = milestones.map(m => ({
+      id: m.id, visionId: m.visionId, title: m.title,
+      timeFrame: m.timeFrame, status: m.status, createdAt: new Date(m.created),
+    }));
+    const geminiTasks = tasks.map(t => ({
+      id: t.id, milestoneId: t.milestoneId, title: t.title,
+      description: t.description, priorityType: t.priorityType as 'inbox',
+      status: t.status as 'pending', targetDate: t.targetDate,
+      streakCount: t.streakCount, createdAt: new Date(t.created),
+    }));
+
+    const result = await runAlignment({
+      visions: geminiVisions, milestones: geminiMilestones, tasks: geminiTasks,
+    });
+
+    setAnalysisSummary(result.ai_analysis_summary);
+    setNotToDoRules(result.not_to_do_rules);
+
+    // Demote existing must/should/could back to inbox first
+    await tasksApi.resetPriorityToInbox();
+
+    // Batch promote new assignments
+    const updates: Promise<unknown>[] = [];
+    if (result.must_do_task_id) {
+      updates.push(tasksApi.update(result.must_do_task_id, { priorityType: 'must', targetDate: today }));
+    }
+    result.should_do_task_ids.forEach(id =>
+      updates.push(tasksApi.update(id, { priorityType: 'should', targetDate: today }))
+    );
+    result.could_do_task_ids.forEach(id =>
+      updates.push(tasksApi.update(id, { priorityType: 'could', targetDate: today }))
+    );
+    await Promise.all(updates);
+
+    // Mark as analyzed in PocketBase (persists across browser clears)
+    await reviewsApi.markTodayAnalyzed(today);
+  }
+
+  // ── Manual AI trigger (button click) ─────────────────────────────────────────
   async function handleRunAI() {
     const apiKey = localStorage.getItem('gemini_api_key');
     if (!apiKey) {
@@ -111,63 +200,14 @@ export default function App() {
     }
     setAiLoading(true);
     setAiError(null);
-
     try {
-      const { runAlignment } = await import('./services/gemini');
-
-      const [visions, milestones, tasks] = await Promise.all([
-        visionsApi.list().then(r => r.filter(v => v.isActive)),
-        milestonesApi.list('pending'),
-        tasksApi.list('priorityType = "inbox" && status != "dropped"'),
-      ]);
-
-      if (tasks.length === 0) {
+      const today = new Date().toISOString().split('T')[0];
+      const inboxTasks = await tasksApi.list('priorityType = "inbox" && status != "dropped"');
+      if (inboxTasks.length === 0) {
         setAiError('收集箱为空，无需分析');
         return;
       }
-
-      // Convert PB records to the shape gemini.ts expects
-      const geminiVisions = visions.map(v => ({
-        id: v.id, content: v.content, target_year: v.target_year,
-        isActive: v.isActive ? 1 : 0, createdAt: new Date(v.created),
-      }));
-      const geminiMilestones = milestones.map(m => ({
-        id: m.id, visionId: m.visionId, title: m.title,
-        timeFrame: m.timeFrame, status: m.status, createdAt: new Date(m.created),
-      }));
-      const geminiTasks = tasks.map(t => ({
-        id: t.id, milestoneId: t.milestoneId, title: t.title,
-        description: t.description, priorityType: t.priorityType as 'inbox',
-        status: t.status as 'pending', targetDate: t.targetDate,
-        streakCount: t.streakCount, createdAt: new Date(t.created),
-      }));
-
-      const result = await runAlignment({
-        visions: geminiVisions,
-        milestones: geminiMilestones,
-        tasks: geminiTasks,
-      });
-
-      setAnalysisSummary(result.ai_analysis_summary);
-      setNotToDoRules(result.not_to_do_rules);
-
-      // Demote existing must/should/could back to inbox first
-      await tasksApi.resetPriorityToInbox();
-
-      // Batch promote new assignments
-      const today = new Date().toISOString().split('T')[0];
-      const updates: Promise<unknown>[] = [];
-      if (result.must_do_task_id) {
-        updates.push(tasksApi.update(result.must_do_task_id, { priorityType: 'must', targetDate: today }));
-      }
-      result.should_do_task_ids.forEach(id =>
-        updates.push(tasksApi.update(id, { priorityType: 'should', targetDate: today }))
-      );
-      result.could_do_task_ids.forEach(id =>
-        updates.push(tasksApi.update(id, { priorityType: 'could', targetDate: today }))
-      );
-      await Promise.all(updates);
-
+      await runAIAlignment(today);
     } catch (e) {
       setAiError(e instanceof Error ? e.message : 'AI 分析失败，请重试');
     } finally {

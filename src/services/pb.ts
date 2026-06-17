@@ -51,6 +51,7 @@ export interface DailyReview extends RecordModel {
   reflectionQ2: string;
   aiInsight: string;
   focusScore: number;
+  ai_analyzed_at: string; // ISO datetime string; empty = not yet analyzed today
 }
 
 /** Plain payload for creating/updating a review — no RecordModel metadata needed */
@@ -61,6 +62,7 @@ export interface DailyReviewPayload {
   reflectionQ2: string;
   aiInsight: string;
   focusScore: number;
+  ai_analyzed_at?: string;
 }
 
 // ─── Connection check ─────────────────────────────────────────────────────────
@@ -286,6 +288,38 @@ export const reviewsApi = {
       );
     } catch {
       return null;
+    }
+  },
+
+  /**
+   * Check whether AI alignment has already run today.
+   * Returns the timestamp string if analyzed, null if not.
+   */
+  async checkTodayAnalyzed(date: string): Promise<string | null> {
+    const review = await this.getByDate(date);
+    if (!review) return null;
+    return review.ai_analyzed_at || null;
+  },
+
+  /**
+   * Record that AI alignment ran today.
+   * Creates or updates the daily_reviews row for today.
+   */
+  async markTodayAnalyzed(date: string): Promise<void> {
+    const now = new Date().toISOString();
+    const existing = await this.getByDate(date);
+    if (existing) {
+      await pb.collection('daily_reviews').update(existing.id, { ai_analyzed_at: now });
+    } else {
+      await pb.collection('daily_reviews').create({
+        date,
+        mustCompleted: false,
+        reflectionQ1: '',
+        reflectionQ2: '',
+        aiInsight: '',
+        focusScore: 0,
+        ai_analyzed_at: now,
+      });
     }
   },
 
