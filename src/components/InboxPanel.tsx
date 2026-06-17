@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Plus, Inbox, Brain, LayoutTemplate, Check, X, Trash2,
-  AlertTriangle, AlertOctagon
+  AlertTriangle, AlertOctagon, Clock
 } from 'lucide-react'
 import { usePB } from '../hooks/usePB'
 import { tasksApi, milestonesApi, type Task, type Milestone } from '../services/pb'
@@ -33,6 +33,7 @@ export function InboxPanel() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [why, setWhy] = useState('')
+  const [estimatedMinutes, setEstimatedMinutes] = useState(0)
   const [milestoneId, setMilestoneId] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -49,8 +50,9 @@ export function InboxPanel() {
         milestoneId: milestoneId || '', title: title.trim(),
         description: description.trim(), why: why.trim(),
         priorityType: 'inbox', status: 'pending', targetDate: '', streakCount: 0,
+        estimatedMinutes, actualMinutes: 0,
       })
-      setTitle(''); setDescription(''); setWhy(''); setMilestoneId('')
+      setTitle(''); setDescription(''); setWhy(''); setEstimatedMinutes(0); setMilestoneId('')
       setShowForm(false); refetch()
     } finally { setSaving(false) }
   }
@@ -59,6 +61,7 @@ export function InboxPanel() {
     await Promise.all(items.map(item => tasksApi.create({
       milestoneId: '', title: item.text, description: '', why: '',
       priorityType: 'inbox', status: 'pending', targetDate: '', streakCount: 0,
+      estimatedMinutes: 0, actualMinutes: 0,
     })))
     refetch(); setShowGuided(false)
   }
@@ -128,6 +131,12 @@ export function InboxPanel() {
               为什么重要？<span className="text-zinc-600 font-normal ml-1">执行时显示（可选）</span>
             </label>
             <Input placeholder="例如：这是MVP上线的最后一块拼图..." value={why} onChange={e => setWhy(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-zinc-400">
+              预估用时<span className="text-zinc-600 font-normal ml-1">分钟，0 = 未填（可选）</span>
+            </label>
+            <EstimatedMinutesInput value={estimatedMinutes} onChange={setEstimatedMinutes} />
           </div>
           {milestones && milestones.length > 0 && (
             <div className="space-y-1.5">
@@ -277,6 +286,8 @@ function TaskRow({ task, idx, editingId, editTitle, setEditTitle, setEditingId, 
           </div>
         )}
         {task.description && <p className="text-xs text-zinc-500 mt-0.5 truncate">{task.description}</p>}
+        {/* Time tracking */}
+        <TimeInfo task={task} onUpdate={() => {}} />
         {editingWhy ? (
           <div className="flex gap-2 mt-1.5">
             <Input className="h-7 text-xs flex-1" placeholder="这件事为什么重要？"
@@ -313,6 +324,125 @@ function TaskRow({ task, idx, editingId, editTitle, setEditTitle, setEditingId, 
         onClick={() => dropTask(task.id)}>
         <Trash2 className="w-3.5 h-3.5" />
       </Button>
+    </div>
+  )
+}
+
+// ── Time helpers ──────────────────────────────────────────────────────────────
+
+export function formatMinutes(mins: number): string {
+  if (!mins || mins <= 0) return ''
+  if (mins < 60) return `${mins}min`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return m > 0 ? `${h}h${m}m` : `${h}h`
+}
+
+/** Quick preset buttons + manual number input for estimating time */
+export function EstimatedMinutesInput({
+  value, onChange,
+}: { value: number; onChange: (v: number) => void }) {
+  const presets = [15, 30, 45, 60, 90, 120]
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {presets.map(p => (
+        <button
+          key={p}
+          type="button"
+          onClick={() => onChange(value === p ? 0 : p)}
+          className={`h-7 px-2.5 rounded-md text-xs font-mono border transition-all
+            ${value === p
+              ? 'bg-zinc-200 text-zinc-900 border-zinc-200'
+              : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:border-zinc-500'}`}
+        >
+          {formatMinutes(p)}
+        </button>
+      ))}
+      <input
+        type="number"
+        min={0}
+        max={480}
+        placeholder="自定义"
+        value={value > 0 && !presets.includes(value) ? value : ''}
+        onChange={e => onChange(Number(e.target.value) || 0)}
+        className="h-7 w-20 rounded-md border border-zinc-700 bg-zinc-800 px-2 text-xs font-mono text-zinc-300 focus:outline-none focus:border-zinc-500"
+      />
+    </div>
+  )
+}
+
+/** Inline time accuracy display on a task row */
+function TimeInfo({ task, onUpdate }: { task: Task; onUpdate: () => void }) {
+  const [recording, setRecording] = useState(false)
+  const [inputVal, setInputVal] = useState('')
+
+  const est = task.estimatedMinutes
+  const act = task.actualMinutes
+
+  async function saveActual() {
+    const mins = parseInt(inputVal, 10)
+    if (!mins || mins <= 0) return
+    await tasksApi.update(task.id, { actualMinutes: mins })
+    setRecording(false)
+    setInputVal('')
+    onUpdate()
+  }
+
+  // Nothing to show if no time data at all
+  if (!est && !act && !recording) {
+    return null
+  }
+
+  const accuracy = est > 0 && act > 0
+    ? Math.round((est / act) * 100)
+    : null
+
+  const accuracyColor =
+    accuracy === null ? '' :
+    accuracy >= 90 && accuracy <= 110 ? 'text-emerald-400' :
+    accuracy >= 75 && accuracy <= 125 ? 'text-amber-400' :
+    'text-red-400'
+
+  return (
+    <div className="flex items-center gap-2 mt-1 flex-wrap">
+      {est > 0 && (
+        <span className="text-xs font-mono text-zinc-600 flex items-center gap-1">
+          <Clock className="w-3 h-3" /> 预估 {formatMinutes(est)}
+        </span>
+      )}
+      {act > 0 && (
+        <span className={`text-xs font-mono flex items-center gap-1 ${accuracyColor || 'text-zinc-500'}`}>
+          实际 {formatMinutes(act)}
+          {accuracy !== null && (
+            <span className="text-zinc-600">({accuracy}%准确)</span>
+          )}
+        </span>
+      )}
+      {task.status === 'completed' && act === 0 && !recording && (
+        <button
+          onClick={() => setRecording(true)}
+          className="text-xs text-zinc-600 hover:text-zinc-400 transition-all flex items-center gap-1"
+        >
+          <Plus className="w-3 h-3" /> 记录实际用时
+        </button>
+      )}
+      {recording && (
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            min={1}
+            max={480}
+            placeholder="分钟"
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') saveActual(); if (e.key === 'Escape') setRecording(false) }}
+            className="h-6 w-16 rounded border border-zinc-600 bg-zinc-800 px-1.5 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-400"
+            autoFocus
+          />
+          <button onClick={saveActual} className="text-xs text-emerald-400 hover:text-emerald-300 font-mono">确认</button>
+          <button onClick={() => setRecording(false)} className="text-xs text-zinc-600 hover:text-zinc-400">取消</button>
+        </div>
+      )}
     </div>
   )
 }

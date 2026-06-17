@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Target, Loader2, Sparkles, CheckCircle2, Circle, AlertTriangle, AlertOctagon } from 'lucide-react'
+import { Target, Loader2, Sparkles, CheckCircle2, Circle, AlertTriangle, AlertOctagon, Clock } from 'lucide-react'
 import { usePB } from '../hooks/usePB'
 import { tasksApi, type Task } from '../services/pb'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { StreakBadge, DayScore } from './StreakAndScore'
 import { CarryOverBanner } from './CarryOverBanner'
+import { formatMinutes } from './InboxPanel'
 import type { StreakData } from '../services/streak'
 
 interface FocusBoardProps {
@@ -19,6 +20,8 @@ interface FocusBoardProps {
 
 function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'normal' }) {
   const [completing, setCompleting] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(false)
+  const [actualInput, setActualInput] = useState('')
   const isCompleted = task.status === 'completed'
   const isStale = (task.streakCount ?? 0) >= 3
   const isCritical = (task.streakCount ?? 0) >= 7
@@ -26,8 +29,20 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
   async function toggleComplete() {
     if (completing) return
     setCompleting(true)
-    await tasksApi.update(task.id, { status: isCompleted ? 'pending' : 'completed' })
+    const nowCompleted = !isCompleted
+    await tasksApi.update(task.id, { status: nowCompleted ? 'completed' : 'pending' })
+    // Prompt for actual time if completing and had an estimate
+    if (nowCompleted && (task.estimatedMinutes ?? 0) > 0 && (task.actualMinutes ?? 0) === 0) {
+      setRecordingTime(true)
+    }
     setTimeout(() => setCompleting(false), 400)
+  }
+
+  async function saveActualTime() {
+    const mins = parseInt(actualInput, 10)
+    if (mins > 0) await tasksApi.update(task.id, { actualMinutes: mins })
+    setRecordingTime(false)
+    setActualInput('')
   }
 
   if (size === 'large') {
@@ -68,6 +83,16 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
               {task.title}
             </p>
             {task.description && <p className="text-sm text-zinc-500 mt-2 leading-relaxed">{task.description}</p>}
+            {/* Estimated time */}
+            {(task.estimatedMinutes ?? 0) > 0 && (
+              <div className="mt-2 flex items-center gap-1.5 text-xs font-mono text-zinc-500">
+                <Clock className="w-3 h-3" />
+                预估 {formatMinutes(task.estimatedMinutes)}
+                {(task.actualMinutes ?? 0) > 0 && (
+                  <span className="text-zinc-600">· 实际 {formatMinutes(task.actualMinutes)}</span>
+                )}
+              </div>
+            )}
             {task.why && !isCompleted && (
               <div className="mt-3 flex items-start gap-2 px-3 py-2 bg-zinc-800/60 border border-zinc-700/60 rounded-lg">
                 <span className="text-zinc-500 text-xs mt-0.5 shrink-0">因为</span>
@@ -76,9 +101,25 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
             )}
           </div>
         </div>
-        {isCompleted && (
+        {isCompleted && !recordingTime && (
           <div className="mt-4 flex items-center gap-2 text-sm text-emerald-400 font-medium">
             <CheckCircle2 className="w-4 h-4" /> 主线大事已完成！继续保持节奏。
+          </div>
+        )}
+        {/* Prompt for actual time after completing */}
+        {recordingTime && (
+          <div className="mt-4 flex items-center gap-3 p-3 bg-zinc-800/60 border border-zinc-700 rounded-lg animate-slide-up">
+            <Clock className="w-4 h-4 text-zinc-400 shrink-0" />
+            <p className="text-xs text-zinc-300">实际用了多少分钟？</p>
+            <input
+              type="number" min={1} max={480} placeholder="分钟"
+              value={actualInput} onChange={e => setActualInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') saveActualTime() }}
+              className="h-7 w-20 rounded border border-zinc-600 bg-zinc-800 px-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-400"
+              autoFocus
+            />
+            <button onClick={saveActualTime} className="text-xs text-emerald-400 hover:text-emerald-300 font-mono">记录</button>
+            <button onClick={() => setRecordingTime(false)} className="text-xs text-zinc-600 hover:text-zinc-400">跳过</button>
           </div>
         )}
       </div>
@@ -108,6 +149,15 @@ function TaskCard({ task, size = 'normal' }: { task: Task; size?: 'large' | 'nor
         </div>
         {task.description && <p className="text-xs text-zinc-600 mt-0.5 truncate">{task.description}</p>}
         {task.why && !isCompleted && <p className="text-xs text-zinc-500 mt-1 italic">因为：{task.why}</p>}
+        {(task.estimatedMinutes ?? 0) > 0 && (
+          <div className="flex items-center gap-1.5 mt-1 text-xs font-mono text-zinc-600">
+            <Clock className="w-3 h-3" />
+            {formatMinutes(task.estimatedMinutes)}
+            {(task.actualMinutes ?? 0) > 0 && (
+              <span>· 实际 {formatMinutes(task.actualMinutes)}</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

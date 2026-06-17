@@ -37,11 +37,13 @@ export interface Task extends RecordModel {
   milestoneId: string;
   title: string;
   description: string;
-  why: string;           // Why this task matters — shown during execution
+  why: string;
   priorityType: 'inbox' | 'must' | 'should' | 'could';
   status: 'pending' | 'completed' | 'dropped';
   targetDate: string;
   streakCount: number;
+  estimatedMinutes: number; // 0 = not set
+  actualMinutes: number;    // 0 = not recorded yet
 }
 
 export interface DailyReview extends RecordModel {
@@ -373,6 +375,8 @@ export const templatesApi = {
       status: 'pending',
       targetDate: '',
       streakCount: 0,
+      estimatedMinutes: 0,
+      actualMinutes: 0,
     };
   },
 
